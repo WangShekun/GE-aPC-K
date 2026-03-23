@@ -32,5 +32,9 @@ end
 Psi_new = aPC_PCE_create_Psi(Ind, univ_vals_new);
 
 % ====== 5) 最终预测 ======
-y_pred = Psi_new * c;
+if isfield(results, 'ModelType') && ~strcmpi(results.ModelType, 'apc')
+    y_pred = aPC_PCKPredict(Psi_new, U_new, results.PCKModel);
+else
+    y_pred = Psi_new * c;
+end
 end

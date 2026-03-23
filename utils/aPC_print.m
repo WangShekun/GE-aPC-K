@@ -40,6 +40,12 @@ fprintf('%s\n', line);
 %% ============================================================
 if any(modules == "basic")
     fprintf('%-28s : %s\n', 'Regression method', upper(results.method));
+    if isfield(results, 'ModelType')
+        fprintf('%-28s : %s\n', 'Model type', upper(results.ModelType));
+    end
+    if isfield(results, 'PCKType') && ~strcmpi(results.PCKType, 'none')
+        fprintf('%-28s : %s\n', 'PCK type', upper(results.PCKType));
+    end
     fprintf('%-28s : %d\n', 'Total PCE terms', size(results.coefficients,1));
     fprintf('%-28s : %d\n', 'Max polynomial order', ModelOpts.Order);
     fprintf('%-28s : %.2f\n', 'q-norm', ModelOpts.qnorm);

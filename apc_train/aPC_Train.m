@@ -15,8 +15,11 @@ if ~isfield(ModelOpts, 'qnorm') || isempty(ModelOpts.qnorm)
     ModelOpts.qnorm = 1;
 end
 
+ModelOpts = localValidateModelOpts(ModelOpts);
+
 %% ---------- 标准化 ----------
 [data, map_U] = aPC_PCE_map_to_U(data.X_train, data);
+data.map_U = map_U;
 
 %% ---------- 构造搜索网格 ----------
 grid = aPC_build_search_grid(ModelOpts);
@@ -50,26 +53,13 @@ if ~ModelOpts.Parallel
         % 当前候选参数（原始版本）
         Mo = grid(gi);
 
-        %% ---------- 降维 ----------
-        if isfield(Mo,'red_dim') && ~isempty(Mo.red_dim)
-            [data_tmp, Mo_tmp, Red_tmp] = aPC_dimReduction(data, Mo);
-        else
-            data_tmp = data;
-            Mo_tmp = Mo;
-            Red_tmp = [];
-            if ~isfield(Mo_tmp,'num_vars') || isempty(Mo_tmp.num_vars)
-                Mo_tmp.num_vars = size(data_tmp.U,2);
-            end
-        end
-
-        % ---------- 构建基函数索引 ----------
-        Mo_tmp.Indices = aPC_GenerateTerms(Mo_tmp);
-        
-        % ---------- 构造多维基函数 ----------
-        [Psi_tmp, poly_tmp, univ_tmp] = aPC_PCE_build_Psi(Mo_tmp, data_tmp);
-
-        % ---------- 回归 ----------
-        res_tmp = aPC_RegressionMethods(Psi_tmp, data_tmp.Y_train, Mo_tmp.RegressionMethod);
+        candidate = aPC_TrainCandidate(data, map_U, Mo);
+        Mo_tmp = candidate.ModelOpts;
+        data_tmp = candidate.data_model;
+        Red_tmp = candidate.ReduceModel;
+        res_tmp = candidate.results;
+        poly_tmp = candidate.poly;
+        univ_tmp = candidate.univ;
 
         %% ---------- 计算搜索准则（仅 LOO） ----------
         score_tmp = res_tmp.LOO;
@@ -106,6 +96,10 @@ if ~ModelOpts.Parallel
             best.ReduceModel= Red_tmp;
             best.choice     = Mo;
             best.U_red      = data_tmp.U;
+            if isfield(data_tmp, 'dY_model')
+                best.dYdX_train = data_tmp.dYdX_train;
+                best.dY_model = data_tmp.dY_model;
+            end
             best.score = score_tmp;
         end
 
@@ -121,6 +115,10 @@ if ~ModelOpts.Parallel
 
     % ===== 保存最佳降维后的 U =====
     data.U_red = best.U_red;
+    if isfield(best, 'dYdX_train')
+        data.dYdX_train = best.dYdX_train;
+        data.dY_model = best.dY_model;
+    end
 
     results.poly_coeffs = best.poly;
     results.univ_vals   = best.univ;
@@ -199,20 +197,13 @@ best_score = outs(best_idx).score;
 best_choice   = grid(best_idx);
 
 %% —— 串行重训 ——
-Mo = best_choice;
-
-if isfield(Mo,'red_dim') && ~isempty(Mo.red_dim)
-    [data_tmp, Mo_tmp, Red_tmp] = aPC_dimReduction(data, Mo);
-else
-    data_tmp = data; Mo_tmp = Mo; Red_tmp = [];
-    if ~isfield(Mo_tmp,'num_vars') || isempty(Mo_tmp.num_vars)
-        Mo_tmp.num_vars = size(data_tmp.U,2);
-    end
-end
-
-Mo_tmp.Indices = aPC_GenerateTerms(Mo_tmp);
-[Psi, poly_coeffs, univ_vals] = aPC_PCE_build_Psi(Mo_tmp, data_tmp);
-res = aPC_RegressionMethods(Psi, data_tmp.Y_train, Mo_tmp.RegressionMethod);
+candidate = aPC_TrainCandidate(data, map_U, best_choice);
+res = candidate.results;
+Mo_tmp = candidate.ModelOpts;
+Red_tmp = candidate.ReduceModel;
+data_tmp = candidate.data_model;
+poly_coeffs = candidate.poly;
+univ_vals = candidate.univ;
 %% —— 写回最终结果 ——
 results                 = res;
 ModelOpts               = Mo_tmp;
@@ -220,6 +211,10 @@ ReduceModel             = Red_tmp;
 
 % ===== 保存最佳降维后的 U（并行版本）=====
 data.U_red = data_tmp.U;
+if isfield(data_tmp, 'dY_model')
+    data.dYdX_train = data_tmp.dYdX_train;
+    data.dY_model = data_tmp.dY_model;
+end
 
 results.poly_coeffs     = poly_coeffs;
 results.univ_vals       = univ_vals;
@@ -274,4 +269,30 @@ if any(strcmp(m, {'kpca','skpca_hsic'}))
 else
     s = '';
 end
+end
+
+function ModelOpts = localValidateModelOpts(ModelOpts)
+    if ~isfield(ModelOpts, 'aPC_Method') || isempty(ModelOpts.aPC_Method)
+        ModelOpts.aPC_Method = 'stieltjes';
+    end
+
+    if ~isfield(ModelOpts, 'ModelType') || isempty(ModelOpts.ModelType)
+        error('aPC:MissingModelType', 'ModelOpts.ModelType is required: apc | apck | geapck.');
+    end
+
+    model_type = lower(strtrim(ModelOpts.ModelType));
+    valid_model_types = {'apc', 'apck', 'geapck'};
+    if ~any(strcmp(model_type, valid_model_types))
+        error('aPC:InvalidModelType', 'Unsupported ModelType: %s', ModelOpts.ModelType);
+    end
+
+    if any(strcmp(model_type, {'apck', 'geapck'}))
+        if ~isfield(ModelOpts, 'PCKType') || isempty(ModelOpts.PCKType)
+            error('aPC:MissingPCKType', 'ModelOpts.PCKType is required for APCK/GEAPCK.');
+        end
+        pck_type = lower(strtrim(ModelOpts.PCKType));
+        if ~any(strcmp(pck_type, {'sequential', 'optimal'}))
+            error('aPC:InvalidPCKType', 'Unsupported PCKType: %s', ModelOpts.PCKType);
+        end
+    end
 end

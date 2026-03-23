@@ -22,6 +22,11 @@ fields = {
     'label_kernel_degree'
     'label_kernel_offset'
 
+    % ===== APCK / GEAPCK =====
+    'KrigingOpts.corr'
+    'KrigingOpts.theta0'
+    'KrigingOpts.nugget'
+
     % Future extension:
     % 'ridge_lambda'
     % 'lasso_alpha'
