@@ -1,0 +1,68 @@
+<h2>MCP-aPC Framework Figure</h2>
+<p class="subtitle">Recommended direction: a hybrid framework diagram for Section 2.3</p>
+
+<div class="section">
+  <div class="mockup">
+    <div class="mockup-header">Recommended Figure Logic</div>
+    <div class="mockup-body" style="padding:18px; line-height:1.7;">
+      <div style="font-weight:700; margin-bottom:10px;">Training data (X, Y)</div>
+      <div style="margin:8px 0;">↓ Standardization to U-space</div>
+      <div style="margin:8px 0;">↓ Candidate reduced dimensions r ∈ [r<sub>min</sub>, r<sub>max</sub>]</div>
+      <div style="margin:8px 0; padding:10px 14px; border:1px solid #d7d7d7; border-radius:10px; background:#fafafa;">
+        For each candidate r:<br>
+        MCP projection → reduced variables Z<sub>r</sub><br>
+        aPC basis construction → Ψ<sub>r</sub><br>
+        Sparse regression (e.g. LARS)<br>
+        Compute LOO error
+      </div>
+      <div style="margin:8px 0;">↓ Select the model with the minimum LOO error</div>
+      <div style="margin:8px 0;">↓ Final MCP-aPC surrogate</div>
+      <div style="margin:8px 0;">↓ Prediction / UQ / Sensitivity analysis</div>
+    </div>
+  </div>
+</div>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Compact Paper Figure</h3>
+      <p>One clean flowchart, suitable for direct insertion into the manuscript.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Detailed Figure</h3>
+      <p>Add internal MCP objective terms and aPC substeps; richer but visually denser.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Two-Level Hybrid</h3>
+      <p>Main framework as the top flow, with a highlighted loop for candidate reduced dimensions and LOO-based model selection.</p>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:24px;">
+  <h3>What I will provide next</h3>
+  <div class="pros-cons">
+    <div class="pros">
+      <h4>Deliverables</h4>
+      <ul>
+        <li>Figure wording in polished English</li>
+        <li>Mermaid source you can edit</li>
+        <li>Layout guidance for draw.io / PPT / Visio redraw</li>
+        <li>Section 2.3 paragraph aligned with the figure</li>
+      </ul>
+    </div>
+    <div class="cons">
+      <h4>Question to Confirm</h4>
+      <ul>
+        <li>Do you want the compact version or the slightly more detailed hybrid version?</li>
+      </ul>
+    </div>
+  </div>
+</div>
