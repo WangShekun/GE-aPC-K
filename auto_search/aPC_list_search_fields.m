@@ -24,7 +24,6 @@ fields = {
 
     % ===== APCK / GEAPCK =====
     'KrigingOpts.corr'
-    'KrigingOpts.theta0'
     'KrigingOpts.nugget'
 
     % Future extension:

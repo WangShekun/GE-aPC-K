@@ -1,5 +1,8 @@
 function dYdX = aPC_FDGradients(data, ModelOpts)
 
+    % Finite-difference fallback used when GEAPCK does not receive analytic or
+    % user-provided gradients.
+
     if ~isfield(data, 'ModelFcn') || isempty(data.ModelFcn)
         error('aPC:MissingModelFcn', 'Automatic gradients require data.ModelFcn.');
     end
@@ -19,6 +22,7 @@ function dYdX = aPC_FDGradients(data, ModelOpts)
 
     dYdX = zeros(N, d);
     for j = 1:d
+        % Use one scalar step per dimension to perturb the whole batch uniformly.
         h = FDOpts.step * max(1, std(X(:, j)));
         Xp = X;
         Xp(:, j) = Xp(:, j) + h;

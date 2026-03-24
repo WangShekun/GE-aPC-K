@@ -1,5 +1,8 @@
 function [dY_model, dYdX] = aPC_PrepareModelGradients(data, map_U, ReduceModel, ModelOpts)
 
+    % Prepare response gradients for GEAPCK in the exact coordinate system used by
+    % the backend: physical X -> standardized U -> optional reduced coordinates.
+
     if ~isfield(ModelOpts, 'GradientMode') || isempty(ModelOpts.GradientMode)
         ModelOpts.GradientMode = 'auto';
     end
@@ -31,6 +34,7 @@ function [dY_model, dYdX] = aPC_PrepareModelGradients(data, map_U, ReduceModel, 
 
     idx = map_U.nonConstIdx;
     sigma = map_U.sigma;
+    % Since U = (X - mu) ./ sigma, gradients transform as dY/dU = dY/dX .* sigma.
     dYdU = dYdX(:, idx) .* sigma;
 
     if isempty(ReduceModel)
@@ -66,7 +70,10 @@ function [A, ok] = localGetLinearMap(ReduceModel)
         ok = true;
         return;
     end
-    if isfield(p, 'W') && isfield(ReduceModel, 'method') && strcmpi(ReduceModel.method, 'pls')
+    if isfield(p, 'W') && isfield(ReduceModel, 'method') && ...
+            (strcmpi(ReduceModel.method, 'pls') || ...
+             strcmpi(ReduceModel.method, 'spca-primal') || ...
+             strcmpi(ReduceModel.method, 'spca-dual'))
         A = p.W;
         ok = true;
         return;

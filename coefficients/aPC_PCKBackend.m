@@ -1,4 +1,8 @@
-function results = aPC_PCKBackend(Psi, Y, data_model, ModelOpts, basis_info)
+function results = aPC_PCKBackend(Psi, data_model, ModelOpts, basis_info)
+
+    % APCK / GEAPCK backend.
+    % The trend comes from sparse polynomial terms; the residual is modeled with
+    % Kriging. GEAPCK augments the Kriging system with response-gradient blocks.
 
     model_type = lower(strtrim(ModelOpts.ModelType));
     pck_type = lower(strtrim(ModelOpts.PCKType));
@@ -15,14 +19,10 @@ function results = aPC_PCKBackend(Psi, Y, data_model, ModelOpts, basis_info)
     KrigingOpts = localSetDef(KrigingOpts, 'theta0', 1.0);
     KrigingOpts = localSetDef(KrigingOpts, 'theta_lb', 1e-3);
     KrigingOpts = localSetDef(KrigingOpts, 'theta_ub', 1e2);
-    KrigingOpts = localSetDef(KrigingOpts, 'optimize_theta', true);
+    KrigingOpts = localSetDef(KrigingOpts, 'optimize_theta', false);
     KrigingOpts = localSetDef(KrigingOpts, 'DisplayProgress', false);
 
-    if use_ge && ~strcmpi(KrigingOpts.corr, 'gaussian')
-        error('aPC:UnsupportedGECorrelation', 'GEAPCK currently supports gaussian correlation only.');
-    end
-
-    Y = Y(:);
+    Y = data_model.Y_train(:);
     U = data_model.U;
     [N, d] = size(U);
 
@@ -65,6 +65,7 @@ function results = aPC_PCKBackend(Psi, Y, data_model, ModelOpts, basis_info)
     best = struct('loo', inf);
     theta_prev = [];
     for i = 1:numel(trend_sizes)
+        % Search nested trend models following the LARS entry order.
         trend_idx = lars_order(1:trend_sizes(i));
         F = Psi_sub(:, trend_idx);
         dF = [];
@@ -108,6 +109,7 @@ function results = aPC_PCKBackend(Psi, Y, data_model, ModelOpts, basis_info)
 end
 
 function model = localFitOne(F, dF, Y, U, G, KrigingOpts, theta_init, use_ge)
+    % Fit one PCK model for a fixed trend matrix F.
     [~, d] = size(U);
 
     if isempty(theta_init)
@@ -133,24 +135,38 @@ function model = localFitOne(F, dF, Y, U, G, KrigingOpts, theta_init, use_ge)
     end
 
     if KrigingOpts.optimize_theta
+        % Optimize in log(theta) so positivity and multi-scale bounds are handled
+        % directly by the optimizer.
         z0 = log(theta0);
-        opts = optimset('Display', 'off', 'MaxIter', 80, 'MaxFunEvals', 300);
-        zopt = fminsearch(@(z) localNLL(exp(z), F, dF, Y, U, G, KrigingOpts, use_ge), z0, opts);
+        zlb = log(theta_lb);
+        zub = log(theta_ub);
+        opts = optimoptions('fmincon', ...
+            'Algorithm', 'sqp', ...
+            'Display', 'off', ...
+            'MaxIterations', 80, ...
+            'MaxFunctionEvaluations', 300);
+        zopt = fmincon(@(z) localNLL(exp(z), F, dF, Y, U, G, KrigingOpts, use_ge), ...
+            z0, [], [], [], [], zlb, zub, [], opts);
         theta = exp(zopt);
+        theta_optimizer = 'fmincon';
     else
         theta = theta0;
+        theta_optimizer = 'fixed';
     end
 
     theta = min(max(theta, theta_lb), theta_ub);
     [~, model] = localNLL(theta, F, dF, Y, U, G, KrigingOpts, use_ge);
     model.theta = theta;
+    model.theta_optimizer = theta_optimizer;
 end
 
 function [nll, model] = localNLL(theta, F, dF, Y, U, G, KrigingOpts, use_ge)
+    % Evaluate the likelihood objective and recover the GLS/Kriging quantities
+    % needed for prediction and approximate LOO.
     if use_ge
-        [K, y_aug, H] = localBuildAugmentedSystem(U, Y, G, F, dF, theta, KrigingOpts.nugget);
+        [K, y_aug, H] = pckBuildAugmentedSystem(U, Y, G, F, dF, theta, KrigingOpts.corr, KrigingOpts.nugget);
     else
-        R = localCorr(U, U, theta, KrigingOpts.corr);
+        R = pckCorrMatrix(U, U, theta, KrigingOpts.corr);
         K = R + KrigingOpts.nugget * eye(size(R));
         y_aug = Y;
         H = F;
@@ -182,6 +198,7 @@ function [nll, model] = localNLL(theta, F, dF, Y, U, G, KrigingOpts, use_ge)
 
     Uinv = L' \ eye(size(L));
     Kinv_diag = sum(Uinv.^2, 2);
+    % Fast approximate LOO for Kriging/PCK based on diag(K^{-1}).
     loo_res = alpha ./ max(Kinv_diag, eps);
     if use_ge
         Nf = size(Y, 1);
@@ -211,68 +228,6 @@ function model = localFallbackModel(F, Y, U, use_ge)
     model.F = F;
     model.loo = inf;
     model.normEmpErr = inf;
-end
-
-function R = localCorr(X1, X2, theta, corr_type)
-    n1 = size(X1, 1);
-    n2 = size(X2, 1);
-    R = zeros(n1, n2);
-
-    for i = 1:n1
-        dx = X2 - X1(i, :);
-        switch lower(corr_type)
-            case 'gaussian'
-                q = sum((dx ./ theta).^2, 2);
-                R(i, :) = exp(-0.5 * q)';
-            case 'exponential'
-                q = sum(abs(dx) ./ theta, 2);
-                R(i, :) = exp(-q)';
-            case 'matern32'
-                q = sqrt(sum((dx ./ theta).^2, 2));
-                R(i, :) = ((1 + sqrt(3) * q) .* exp(-sqrt(3) * q))';
-            otherwise
-                error('aPC:UnsupportedCorrelation', 'Unsupported corr type: %s', corr_type);
-        end
-    end
-
-    if n1 == n2
-        R = (R + R') * 0.5;
-        R(1:n1+1:end) = 1;
-    end
-end
-
-function [K, y_aug, H] = localBuildAugmentedSystem(U, Y, G, F, dF, theta, nugget)
-    N = size(U, 1);
-    d = size(U, 2);
-
-    Kff = localCorr(U, U, theta, 'gaussian');
-    Kfg = zeros(N, N * d);
-    Kgf = zeros(N * d, N);
-    Kgg = zeros(N * d, N * d);
-
-    for i = 1:N
-        for j = 1:N
-            delta = U(i, :) - U(j, :);
-            kij = Kff(i, j);
-            for a = 1:d
-                col = (a - 1) * N + j;
-                row = (a - 1) * N + i;
-                Kfg(i, col) = (delta(a) / (theta(a)^2)) * kij;
-                Kgf(row, j) = -(delta(a) / (theta(a)^2)) * kij;
-
-                for b = 1:d
-                    col2 = (b - 1) * N + j;
-                    term = double(a == b) / (theta(a)^2) - ...
-                        delta(a) * delta(b) / ((theta(a)^2) * (theta(b)^2));
-                    Kgg(row, col2) = term * kij;
-                end
-            end
-        end
-    end
-
-    K = [Kff, Kfg; Kgf, Kgg] + nugget * eye(N * (d + 1));
-    y_aug = [Y; reshape(G, N * d, 1)];
-    H = [F; dF];
 end
 
 function S = localSetDef(S, field, val)

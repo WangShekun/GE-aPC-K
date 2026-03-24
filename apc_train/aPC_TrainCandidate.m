@@ -18,10 +18,12 @@ function candidate = aPC_TrainCandidate(data, map_U, ModelOpts)
         results.PCKType = 'none';
     else
         if strcmp(model_type, 'geapck')
+            % GEAPCK needs response gradients mapped into the same reduced/model
+            % space used to build the covariance system.
             [data_model.dY_model, data_model.dYdX_train] = ...
                 aPC_PrepareModelGradients(data, map_U, ReduceModel, ModelOptsOut);
         end
-        results = aPC_PCKBackend(Psi, data_model.Y_train, data_model, ModelOptsOut, basis_info);
+        results = aPC_PCKBackend(Psi, data_model, ModelOptsOut, basis_info);
     end
 
     candidate = struct();
