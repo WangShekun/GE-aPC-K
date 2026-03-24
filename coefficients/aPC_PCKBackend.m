@@ -1,0 +1,356 @@
+function results = aPC_PCKBackend(Psi, data_model, ModelOpts, basis_info)
+
+    % APCK / GEAPCK backend.
+    % The trend comes from sparse polynomial terms; the residual is modeled with
+    % Kriging. GEAPCK augments the Kriging system with response-gradient blocks.
+
+    model_type = lower(strtrim(ModelOpts.ModelType));
+    pck_type = lower(strtrim(ModelOpts.PCKType));
+    use_ge = strcmp(model_type, 'geapck');
+
+    if ~isfield(ModelOpts, 'KrigingOpts') || isempty(ModelOpts.KrigingOpts)
+        KrigingOpts = struct();
+    else
+        KrigingOpts = ModelOpts.KrigingOpts;
+    end
+
+    KrigingOpts = localSetDef(KrigingOpts, 'corr', 'gaussian');
+    KrigingOpts = localSetDef(KrigingOpts, 'nugget', 1e-8);
+    KrigingOpts = localSetDef(KrigingOpts, 'theta0', 1.0);
+    KrigingOpts = localSetDef(KrigingOpts, 'theta_lb', 1e-3);
+    KrigingOpts = localSetDef(KrigingOpts, 'theta_ub', 1e2);
+    KrigingOpts = localSetDef(KrigingOpts, 'optimize_theta', false);
+    KrigingOpts = localSetDef(KrigingOpts, 'DisplayProgress', false);
+
+    parallel_scope = 'serial';
+    if isfield(ModelOpts, 'ParallelScope') && ~isempty(ModelOpts.ParallelScope)
+        parallel_scope = lower(strtrim(ModelOpts.ParallelScope));
+    end
+
+    Y = data_model.Y_train(:);
+    U = data_model.U;
+    [N, d] = size(U);
+
+    lars_res = aPC_LARS(Psi, Y);
+    if isfield(lars_res, 'lars_idx') && ~isempty(lars_res.lars_idx)
+        lars_order = lars_res.lars_idx(:)';
+    else
+        lars_order = find(abs(lars_res.coefficients) > 0).';
+    end
+    lars_order = unique(lars_order, 'stable');
+    if isempty(lars_order)
+        lars_order = 1:min(size(Psi, 2), 1);
+    end
+
+    [k_start, k_end] = localResolveTrendRange(KrigingOpts, numel(lars_order));
+    trend_sizes = k_start:k_end;
+
+    nmax = N;
+    if use_ge
+        if ~isfield(data_model, 'dY_model') || isempty(data_model.dY_model)
+            error('aPC:MissingModelGradient', 'GEAPCK requires prepared model-space gradients.');
+        end
+    end
+
+    idx_sub = 1:N;
+    if N > nmax
+        rng(7);
+        idx_sub = sort(randperm(N, nmax));
+    end
+
+    U_sub = U(idx_sub, :);
+    Y_sub = Y(idx_sub);
+    Psi_sub = Psi(idx_sub, :);
+    if use_ge
+        G_sub = data_model.dY_model(idx_sub, :);
+    else
+        G_sub = [];
+    end
+
+    best = struct('loo', inf);
+    theta_prev = [];
+    if strcmp(parallel_scope, 'trend') && strcmp(pck_type, 'optimal') && numel(trend_sizes) > 1
+        models = cell(1, numel(trend_sizes));
+        dq = parallel.pool.DataQueue;
+        cnt = 0;
+        bar_len = 30;
+        afterEach(dq, @updateTrendBar);
+        parfor i = 1:numel(trend_sizes)
+            models{i} = localEvaluateTrend(trend_sizes(i), i, numel(trend_sizes), 'parallel', lars_order, Psi_sub, U_sub, Y_sub, G_sub, ...
+                basis_info, idx_sub, KrigingOpts, use_ge, []);
+            send(dq, i);
+        end
+        fprintf('\n');
+        loo_vals = cellfun(@(m) m.loo, models);
+        [~, best_idx] = min(loo_vals);
+        best = models{best_idx};
+    else
+        for i = 1:numel(trend_sizes)
+            theta_init = [];
+            if strcmp(pck_type, 'sequential') && ~isempty(theta_prev)
+                theta_init = theta_prev;
+            end
+            model_i = localEvaluateTrend(trend_sizes(i), i, numel(trend_sizes), 'serial', lars_order, Psi_sub, U_sub, Y_sub, G_sub, ...
+                basis_info, idx_sub, KrigingOpts, use_ge, theta_init);
+            theta_prev = model_i.theta;
+
+            if model_i.loo < best.loo
+                best = model_i;
+            end
+        end
+    end
+
+    results = struct();
+    results.method = upper(model_type);
+    results.ModelType = model_type;
+    results.PCKType = pck_type;
+    results.coefficients = lars_res.coefficients;
+    results.LOO = best.loo;
+    results.normEmpErr = best.normEmpErr;
+    results.max_score = 1 - best.loo;
+    results.optErrorParams = struct('loo', best.loo, 'criterion', 'kriging-approx-loo');
+    results.PCKModel = best;
+    results.PCKModel.U_train = U_sub;
+    results.PCKModel.corr = KrigingOpts.corr;
+    results.PCKModel.nugget = KrigingOpts.nugget;
+    results.PCKModel.use_ge = use_ge;
+    results.PCKModel.parallel_scope = parallel_scope;
+    results.basis_info = basis_info;
+
+    function updateTrendBar(~)
+        cnt = cnt + 1;
+        fprintf('\r%s', localFormatTrendProgress('parallel', cnt, numel(trend_sizes), bar_len));
+    end
+end
+
+function model_i = localEvaluateTrend(trend_size, trend_pos, trend_total, progress_mode, lars_order, Psi_sub, U_sub, Y_sub, G_sub, ...
+        basis_info, idx_sub, KrigingOpts, use_ge, theta_init)
+    % Evaluate one trend size from the nested LARS path.
+    trend_idx = lars_order(1:trend_size);
+    F = Psi_sub(:, trend_idx);
+    dF = [];
+    if use_ge
+        dF = localBuildTrendGradientMatrix(U_sub, basis_info, idx_sub, trend_idx);
+    end
+
+    if KrigingOpts.DisplayProgress && strcmp(progress_mode, 'serial')
+        fprintf('%s\n', localFormatTrendProgress('serial', trend_pos, trend_total, 30));
+    end
+
+    model_i = localFitOne(F, dF, Y_sub, U_sub, G_sub, KrigingOpts, theta_init, use_ge);
+    model_i.trend_idx = trend_idx;
+end
+
+function line = localFormatTrendProgress(mode, trend_pos, trend_total, bar_len)
+    pct = trend_pos / trend_total;
+    filled = round(pct * bar_len);
+    bar_str = [repmat('#', 1, filled), repmat('-', 1, bar_len - filled)];
+    label = 'Trend-Serial';
+    if strcmpi(mode, 'parallel')
+        label = 'Trend-Parallel';
+    end
+    line = sprintf('[aPC_PCKBackend] [%s] trend %d/%d [%s] %3d%%', ...
+        label, trend_pos, trend_total, bar_str, round(pct * 100));
+end
+
+function model = localFitOne(F, dF, Y, U, G, KrigingOpts, theta_init, use_ge)
+    % Fit one PCK model for a fixed trend matrix F.
+    [~, d] = size(U);
+
+    if isempty(theta_init)
+        theta0 = KrigingOpts.theta0;
+    else
+        theta0 = theta_init;
+    end
+    if isscalar(theta0)
+        theta0 = repmat(theta0, 1, d);
+    else
+        theta0 = theta0(:)';
+    end
+
+    if isscalar(KrigingOpts.theta_lb)
+        theta_lb = repmat(KrigingOpts.theta_lb, 1, d);
+    else
+        theta_lb = KrigingOpts.theta_lb;
+    end
+    if isscalar(KrigingOpts.theta_ub)
+        theta_ub = repmat(KrigingOpts.theta_ub, 1, d);
+    else
+        theta_ub = KrigingOpts.theta_ub;
+    end
+
+    if KrigingOpts.optimize_theta
+        % Optimize in log(theta) so positivity and multi-scale bounds are handled
+        % directly by the optimizer.
+        z0 = log(theta0);
+        zlb = log(theta_lb);
+        zub = log(theta_ub);
+        opts = optimoptions('fmincon', ...
+            'Algorithm', 'sqp', ...
+            'Display', 'off', ...
+            'MaxIterations', 80, ...
+            'MaxFunctionEvaluations', 300);
+        zopt = fmincon(@(z) localNLL(exp(z), F, dF, Y, U, G, KrigingOpts, use_ge), ...
+            z0, [], [], [], [], zlb, zub, [], opts);
+        theta = exp(zopt);
+        theta_optimizer = 'fmincon';
+    else
+        theta = theta0;
+        theta_optimizer = 'fixed';
+    end
+
+    theta = min(max(theta, theta_lb), theta_ub);
+    [~, model] = localNLL(theta, F, dF, Y, U, G, KrigingOpts, use_ge);
+    model.theta = theta;
+    model.theta_optimizer = theta_optimizer;
+end
+
+function [nll, model] = localNLL(theta, F, dF, Y, U, G, KrigingOpts, use_ge)
+    % Evaluate the likelihood objective and recover the GLS/Kriging quantities
+    % needed for prediction and approximate LOO.
+    if use_ge
+        [K, y_aug, H] = pckBuildAugmentedSystem(U, Y, G, F, dF, theta, KrigingOpts.corr, KrigingOpts.nugget);
+    else
+        R = pckCorrMatrix(U, U, theta, KrigingOpts.corr);
+        K = R + KrigingOpts.nugget * eye(size(R));
+        y_aug = Y;
+        H = F;
+    end
+
+    K = (K + K') * 0.5;
+    [L, p] = chol(K, 'lower');
+    if p ~= 0
+        nll = 1e12;
+        model = localFallbackModel(F, Y, U, use_ge);
+        return;
+    end
+
+    Kinvy = L' \ (L \ y_aug);
+    KinvH = L' \ (L \ H);
+    A = H' * KinvH;
+    b = H' * Kinvy;
+    if rcond(A) < 1e-12
+        beta = pinv(A) * b;
+    else
+        beta = A \ b;
+    end
+
+    residual = y_aug - H * beta;
+    alpha = L' \ (L \ residual);
+    nobs = numel(y_aug);
+    sigma2 = max((residual' * alpha) / nobs, eps);
+    nll = nobs * log(sigma2) + 2 * sum(log(diag(L)));
+
+    Uinv = L' \ eye(size(L));
+    Kinv_diag = sum(Uinv.^2, 2);
+    % Fast approximate LOO for Kriging/PCK based on diag(K^{-1}).
+    loo_res = alpha ./ max(Kinv_diag, eps);
+    if use_ge
+        Nf = size(Y, 1);
+        loo = mean(loo_res(1:Nf).^2) / max(var(Y, 1), eps);
+        normEmpErr = mean(residual(1:Nf).^2) / max(var(Y, 1), eps);
+    else
+        loo = mean(loo_res.^2) / max(var(Y, 1), eps);
+        normEmpErr = mean(residual.^2) / max(var(Y, 1), eps);
+    end
+
+    model = struct();
+    model.beta = beta;
+    model.alpha = alpha;
+    model.K = K;
+    model.L = L;
+    model.F = F;
+    model.loo = loo;
+    model.normEmpErr = normEmpErr;
+end
+
+function model = localFallbackModel(F, Y, U, use_ge)
+    model = struct();
+    model.beta = zeros(size(F, 2), 1);
+    model.alpha = zeros(size(Y, 1) * (1 + use_ge * size(U, 2)), 1);
+    model.K = eye(numel(model.alpha));
+    model.L = eye(numel(model.alpha));
+    model.F = F;
+    model.loo = inf;
+    model.normEmpErr = inf;
+end
+
+function S = localSetDef(S, field, val)
+    if ~isfield(S, field) || isempty(S.(field))
+        S.(field) = val;
+    end
+end
+
+function [k_start, k_end] = localResolveTrendRange(KrigingOpts, total_terms)
+    if ~isfield(KrigingOpts, 'max_trend_terms') || isempty(KrigingOpts.max_trend_terms)
+        k_start = 1;
+        k_end = total_terms;
+        return;
+    end
+
+    cfg = KrigingOpts.max_trend_terms;
+    if ~isnumeric(cfg) || any(~isfinite(cfg(:)))
+        error('aPC:InvalidMaxTrendTerms', 'KrigingOpts.max_trend_terms must be numeric and finite.');
+    end
+
+    if isscalar(cfg)
+        k_start = 1;
+        k_end = localResolveOneBound(cfg, total_terms);
+        return;
+    end
+
+    if numel(cfg) == 2
+        k1 = localResolveOneBound(cfg(1), total_terms);
+        k2 = localResolveOneBound(cfg(2), total_terms);
+        k_start = min(k1, k2);
+        k_end = max(k1, k2);
+        return;
+    end
+
+    error('aPC:InvalidMaxTrendTerms', 'KrigingOpts.max_trend_terms must be scalar or 2-element vector.');
+end
+
+function k = localResolveOneBound(v, total_terms)
+    if v <= 0
+        error('aPC:InvalidMaxTrendTerms', 'KrigingOpts.max_trend_terms values must be positive.');
+    end
+    if v <= 1
+        k = max(1, ceil(v * total_terms));
+    else
+        k = min(total_terms, round(v));
+    end
+end
+
+function dF = localBuildTrendGradientMatrix(U_sub, basis_info, idx_sub, trend_idx)
+    Indices = basis_info.Indices(trend_idx, :);
+    poly_coeffs = basis_info.poly_coeffs;
+    univ_vals = basis_info.univ_vals(idx_sub, :, :);
+
+    N = size(U_sub, 1);
+    M = size(U_sub, 2);
+    K = size(Indices, 1);
+    dF = zeros(N * M, K);
+
+    for a = 1:M
+        rows = (a - 1) * N + (1:N);
+        for t = 1:K
+            term_val = ones(N, 1);
+            for j = 1:M
+                deg = Indices(t, j);
+                if j == a
+                    coeff = poly_coeffs{j}{deg + 1};
+                    dcoeff = polyder(coeff);
+                    if isempty(dcoeff)
+                        val = zeros(N, 1);
+                    else
+                        val = polyval(dcoeff, U_sub(:, j));
+                    end
+                else
+                    val = univ_vals(:, j, deg + 1);
+                end
+                term_val = term_val .* val;
+            end
+            dF(rows, t) = term_val;
+        end
+    end
+end

@@ -16,6 +16,11 @@ function UQ = aPC_ComputeUQ(results, Data)
 % --------------------------------------------------------
 UQ.hasStats = false;
 
+if isfield(results, 'ModelType') && ~strcmpi(results.ModelType, 'apc')
+    error('aPC:UQOnlyForAPC', ...
+        'aPC_ComputeUQ currently supports APC only. Current ModelType = %s.', results.ModelType);
+end
+
 c       = results.coefficients(:);
 Indices = results.Indices;   % K×M
 

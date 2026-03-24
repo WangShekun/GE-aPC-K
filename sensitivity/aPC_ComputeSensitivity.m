@@ -14,6 +14,12 @@ function SA = aPC_ComputeSensitivity(results, ModelOpts)
 %   SA.S_second : M×M 二阶 Sobol 指数矩阵（上三角有值）
 % --------------------------------------------------------
 
+    if isfield(results, 'ModelType') && ~strcmpi(results.ModelType, 'apc')
+        error('aPC:SensitivityOnlyForAPC', ...
+            'aPC_ComputeSensitivity currently supports APC only. Current ModelType = %s.', ...
+            results.ModelType);
+    end
+
     c       = results.coefficients(:);
     Indices = results.Indices;
     M       = ModelOpts.num_vars;

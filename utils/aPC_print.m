@@ -1,250 +1,275 @@
 function aPC_print(results, ModelOpts, data, varargin)
-% aPC_print - 可选择模块的 Arbitrary PCE 结果打印函数
-%
-% 可用模块选项：
-%   "basic"          - 基本信息
-%   "samples"        - 训练/测试信息
-%   "errors"         - 误差指标
-%   "coefficients"   - 多项式系数
-%   "orthogonality"  - 正交性检查
-%
-% 特殊：
-%   "all"            - 打印所有模块
-%
-% 默认（未指定时）打印：
-%   basic + samples + errors
+% aPC_print Print a normalized training report for APC/APCK/GEAPCK models.
+% Optional modules: "basic", "samples", "errors", "reduction",
+% "coefficients", "orthogonality", or "all".
 
-%% ---------- 默认模块 ----------
-default_modules = ["basic", "samples", "errors", "orthogonality"];
+    default_modules = ["basic", "samples", "errors", "reduction"];
+    modules = localResolveModules(default_modules, varargin{:});
 
-if nargin < 4
-    modules = default_modules;
-else
-    if any(strcmpi(varargin, "all"))
-        modules = ["basic","samples","errors","coefficients","orth"];
-    else
-        modules = string(varargin);
-    end
-end
-Indices = ModelOpts.Indices;
-%% ---------- 打印框架 ----------
-line        = repmat('-', 1, 78);
-line_double = repmat('=', 1, 78);
+    width = 84;
+    divider = repmat('-', 1, width);
+    banner = localBanner('aPC REPORT', width);
 
-fprintf('\n%s\n', line_double);
-fprintf('Arbitrary Polynomial Chaos Expansion Report\n');
-fprintf('%s\n', line);
+    fprintf('\n%s\n', banner);
 
-%% ============================================================
-%% 1) 基本信息（basic）
-%% ============================================================
-if any(modules == "basic")
-    fprintf('%-28s : %s\n', 'Regression method', upper(results.method));
-    fprintf('%-28s : %d\n', 'Total PCE terms', size(results.coefficients,1));
-    fprintf('%-28s : %d\n', 'Max polynomial order', ModelOpts.Order);
-    fprintf('%-28s : %.2f\n', 'q-norm', ModelOpts.qnorm);
+    if any(modules == "basic")
+        localPrintSection('Model Summary', width);
+        localPrintKV('Regression method', upper(localGetString(results, 'method', '-')));
+        localPrintKV('Model type', upper(localGetString(results, 'ModelType', 'APC')));
 
-    if strcmpi(results.method, 'LARS')
-        fprintf('%-28s : %d\n', 'Active terms', nnz(results.coefficients));
-    end
-
-    %% ----- 降维信息打印（若存在） -----
-    if isfield(ModelOpts,'ReductionMethod') && ~isempty(ModelOpts.ReductionMethod)
-        fprintf('%-28s : %s\n', 'Dimension reduction', upper(ModelOpts.ReductionMethod));
-
-        if isfield(ModelOpts,'red_dim') && ~isempty(ModelOpts.red_dim)
-            fprintf('%-28s : %d\n', 'Reduced dimension', ModelOpts.red_dim);
+        pck_type = localGetString(results, 'PCKType', 'none');
+        if ~strcmpi(pck_type, 'none')
+            localPrintKV('PCK type', upper(pck_type));
         end
 
-        % ---- KPCA 专属 kernel 信息 ----
-        if strcmpi(ModelOpts.ReductionMethod,'kpca')
-            kernel_str = aPC_format_kernel_str(ModelOpts);
-            fprintf('%-28s : %s\n', 'KPCA kernel', kernel_str);
+        localPrintKV('Max polynomial order', localFormatScalar(localGetNumeric(ModelOpts, 'Order', '-')));
+        localPrintKV('q-norm', localFormatScalar(localGetNumeric(ModelOpts, 'qnorm', '-')));
+        localPrintKV('Total PCE terms', localFormatScalar(size(localGetArray(results, 'coefficients'), 1)));
+
+        coeffs = localGetArray(results, 'coefficients');
+        if strcmpi(localGetString(results, 'method', ''), 'lars') && ~isempty(coeffs)
+            localPrintKV('Active terms', localFormatScalar(nnz(coeffs)));
         end
+
+        fprintf('%s\n', divider);
     end
 
-
-    fprintf('%s\n', line);
-end
-
-%% ============================================================
-%% 2) 样本信息（samples）
-%% ============================================================
-if any(modules == "samples")
-    if isfield(results,'N_train')
-        fprintf('%-28s : %d\n', 'Training samples', results.N_train);
-    else
-        fprintf('%-28s : %s\n', 'Training samples', '—');
+    if any(modules == "samples")
+        localPrintSection('Data Summary', width);
+        localPrintKV('Training samples', localFormatScalar(localGetNumeric(results, 'N_train', size(localGetArray(data, 'X_train'), 1))));
+        localPrintKV('Testing samples', localFormatScalar(localGetNumeric(results, 'N_test', localGetOptionalCount(data, 'X_val'))));
+        localPrintKV('Input dimension', localFormatScalar(localResolveInputDim(ModelOpts, data)));
+        fprintf('%s\n', divider);
     end
 
-    if isfield(results,'N_test')
-        fprintf('%-28s : %d\n', 'Testing samples', results.N_test);
-    else
-        fprintf('%-28s : %s\n', 'Testing samples', '—');
-    end
+    if any(modules == "errors")
+        localPrintSection('Error Summary', width);
+        loo = '-';
+        if isfield(results, 'optErrorParams') && isfield(results.optErrorParams, 'loo')
+            loo = localFormatMetric(results.optErrorParams.loo);
+        elseif isfield(results, 'LOO')
+            loo = localFormatMetric(results.LOO);
+        end
+        localPrintKV('LOO error', loo);
 
-    fprintf('%-28s : %d\n', 'Input dimension', ModelOpts.num_vars);
+        if isfield(results, 'optErrorParams') && isfield(results.optErrorParams, 'ModifiedLoo')
+            localPrintKV('Modified LOO', localFormatMetric(results.optErrorParams.ModifiedLoo));
+        end
 
-    fprintf('%s\n', line);
-end
-
-%% ============================================================
-%% 3) 误差指标（errors）
-%% ============================================================
-if any(modules == "errors")
-    if isfield(results,'optErrorParams') && isfield(results.optErrorParams,'loo')
-        fprintf('%-28s : %.6e\n', 'LOO error', results.optErrorParams.loo);
-    else
-        fprintf('%-28s : %s\n', 'LOO error', '—');
-    end
-
-    if isfield(results,'optErrorParams') && isfield(results.optErrorParams,'ModifiedLoo')
-        fprintf('%-28s : %.6e\n', 'Modified LOO', results.optErrorParams.ModifiedLoo);
-    else
-        fprintf('%-28s : %s\n', 'Modified LOO', '—');
-    end
-
-    if isfield(results,'RelMSE')
-        fprintf('%-28s : %.6e\n', 'RelMSE', results.RelMSE);
-    else
-        fprintf('%-28s : %s\n', 'RelMSE', '—');
-    end
-
-    fprintf('%s\n', line);
-end
-
-%% ============================================================
-%% 4) 正交性检查（orthogonality）
-%% ============================================================
-if any(modules == "orthogonality")
-
-    fprintf('Orthogonality / Conditioning Diagnostics:\n');
-
-    if ~isfield(results,'univ_vals') || isempty(results.univ_vals)
-        fprintf('  [WARN] results.univ_vals not found -> skip diagnostics.\n');
-        fprintf('%s\n', line);
-    else
-        univ_vals = results.univ_vals;      % N x M x (P+1)
-        [N_u, M_u, Q_u] = size(univ_vals);
-
-        % ---- 取 Indices（优先 results.Indices，其次 ModelOpts.Indices）----
-        if isfield(results,'Indices') && ~isempty(results.Indices)
-            Indices = results.Indices;
-            idx_src = 'results.Indices';
+        if isfield(results, 'RelMSE')
+            localPrintKV('RelMSE', localFormatMetric(results.RelMSE));
         else
-            Indices = ModelOpts.Indices;
-            idx_src = 'ModelOpts.Indices';
+            localPrintKV('RelMSE', '-');
         end
+        fprintf('%s\n', divider);
+    end
 
-        % ---- 一维阶数（仅用于打印说明；Psi 构造会用 Indices 指定的阶）----
-        p_u = Q_u - 1;
-
-        fprintf('  Data: N = %d, M = %d, univ basis max order = %d (Q = %d)\n', N_u, M_u, p_u, Q_u);
-        fprintf('  Indices: size = %d x %d  (from %s)\n', size(Indices,1), size(Indices,2), idx_src);
-
-        %% ---------- (A) Univariate orthogonality sanity check ----------
-        % 对每个维度，用 0..min(p_u, ModelOpts.Order) 检查 Gram ≈ I
-        p_check = ModelOpts.Order;
-        if p_check > p_u, p_check = p_u; end
-        nb = p_check + 1;
-
-        fprintf('  [Univariate Gram check] using p = %d (basis size = %d)\n', p_check, nb);
-
-        I = eye(nb);
-        froErr  = zeros(1, M_u);
-        condEst = zeros(1, M_u);
-
-        for j = 1:M_u
-            Phi = squeeze(univ_vals(:, j, 1:nb));     % N x (p+1)
-            G   = (Phi' * Phi) / size(Phi,1);
-            G   = (G + G')/2;
-
-            froErr(j) = norm(G - I, 'fro');
-
-            ev = eig(G);
-            ev = sort(real(ev), 'ascend');
-            lamMin = ev(1); lamMax = ev(end);
-            if lamMin <= 0, condEst(j) = inf; else, condEst(j) = lamMax/lamMin; end
-
-            fprintf('    Dim %2d | cond ~ %9.3e | ||G-I||_F = %9.3e\n', j, condEst(j), froErr(j));
+    if any(modules == "reduction") && isfield(ModelOpts, 'ReductionMethod') && ~isempty(ModelOpts.ReductionMethod)
+        localPrintSection('Reduction Summary', width);
+        localPrintKV('Dimension reduction', upper(ModelOpts.ReductionMethod));
+        if isfield(ModelOpts, 'red_dim') && ~isempty(ModelOpts.red_dim)
+            localPrintKV('Reduced dimension', localFormatScalar(ModelOpts.red_dim));
         end
-        fprintf('    Summary: max ||G-I||_F = %.3e\n', max(froErr));
-
-        %% ---------- (B) Multivariate design-matrix diagnostics (Psi) ----------
-        % 由 Indices + univ_vals 构造 Psi
-        try
-            Psi = aPC_PCE_create_Psi(Indices, univ_vals);   % N x K
-        catch ME
-            fprintf('  [Psi] FAILED to create Psi: %s\n', ME.message);
-            fprintf('%s\n', line);
-            return;
+        if any(strcmpi(ModelOpts.ReductionMethod, {'kpca', 'skpca_hsic'}))
+            localPrintKV('Kernel', aPC_format_kernel_str(ModelOpts));
         end
+        fprintf('%s\n', divider);
+    end
 
-        [N, K] = size(Psi);
-        fprintf('  [Psi diagnostics] Psi created: size = %d x %d (N/K = %.3f)\n', N, K, N/max(K,1));
+    if any(modules == "orthogonality")
+        localPrintOrthogonality(results, ModelOpts, divider, width);
+    end
 
-        % rank (数值秩)
-        try
-            rk = rank(Psi);
-        catch
-            rk = NaN;
+    if any(modules == "coefficients")
+        localPrintSection('PCE Coefficients', width);
+        coeffs = localGetArray(results, 'coefficients');
+        indices = localResolveIndices(results, ModelOpts);
+        fprintf('%-6s %-20s %s\n', 'Idx', 'Multi-Index', 'Coefficient');
+        for k = 1:numel(coeffs)
+            idx = sprintf('%d,', indices(k, :));
+            idx = ['[', idx(1:end-1), ']'];
+            fprintf('%6d %-20s % .8e\n', k, idx, coeffs(k));
         end
-        fprintf('    rank(Psi) = %g (max = %d)\n', rk, min(N,K));
+        fprintf('%s\n', divider);
+    end
 
-        % Normal matrix conditioning
-        H = Psi' * Psi;
+    fprintf('%s\n', banner);
+end
 
-        cPsi = cond(H);
-        fprintf('    cond(Psi''Psi) = %.3e\n', cPsi)
+function modules = localResolveModules(default_modules, varargin)
+    if isempty(varargin)
+        modules = default_modules;
+        return;
+    end
 
-        rc = rcond(H);
-        fprintf('    rcond(Psi''Psi) = %.3e\n', rc);
-        
+    requested = string(varargin);
+    if any(strcmpi(requested, "all"))
+        modules = ["basic", "samples", "errors", "reduction", "orthogonality", "coefficients"];
+        return;
+    end
 
-        try
-            ce = condest(H);
-            fprintf('    condest(Psi''Psi) ~ %.3e\n', ce);
-        catch
-            fprintf('    condest(Psi''Psi) ~ [NA]\n');
-        end
+    modules = requested;
+end
 
-        % Optional: report diag dominance / column scaling
-        coln = sqrt(sum(Psi.^2, 1));
-        fprintf('    col-norm: min = %.3e, median = %.3e, max = %.3e\n', min(coln), median(coln), max(coln));
+function localPrintSection(title, width)
+    fprintf('%s\n', localBanner(title, width));
+end
 
-        % Leverage via QR: h_i = ||Q(i,:)||^2
-        try
-            [Q, ~] = qr(Psi, 0);
-            h = sum(Q.^2, 2);
-            fprintf('    leverage h: max = %.4f, mean = %.4f, std = %.4f\n', max(h), mean(h), std(h));
-        catch
-            fprintf('    leverage h: [WARN] qr(Psi,0) failed (size/memory).\n');
-        end
+function line = localBanner(title, width)
+    inner = sprintf(' %s ', title);
+    pad_total = max(0, width - strlength(inner));
+    left = floor(pad_total / 2);
+    right = pad_total - left;
+    line = [repmat('=', 1, left), inner, repmat('=', 1, right)];
+end
 
-        fprintf('%s\n', line);
+function localPrintKV(key, val)
+    fprintf('%-28s : %s\n', key, string(val));
+end
+
+function out = localGetString(S, field, default)
+    if isfield(S, field) && ~isempty(S.(field))
+        out = string(S.(field));
+    else
+        out = string(default);
     end
 end
 
-
-%% ============================================================
-%% 5) 系数（coefficients）
-%% ============================================================
-if any(modules == "coefficients")
-    fprintf('PCE Coefficients:\n');
-    fprintf('%-6s %-20s %s\n', 'Idx', 'Multi-Index', 'Coefficient');
-
-    num_terms = length(results.coefficients);
-
-    for k = 1:num_terms
-        idx = sprintf('%d,', Indices(k,:));
-        idx = ['[', idx(1:end-1), ']'];
-        fprintf('%6d %-20s % .8e\n', k, idx, results.coefficients(k));
+function out = localGetNumeric(S, field, default)
+    if isfield(S, field) && ~isempty(S.(field))
+        out = S.(field);
+    else
+        out = default;
     end
-
-    fprintf('%s\n', line);
 end
 
-%% ---------- 结束：总是打印双横线 ----------
-fprintf('%s\n', line_double);
+function out = localGetArray(S, field)
+    if isfield(S, field) && ~isempty(S.(field))
+        out = S.(field);
+    else
+        out = [];
+    end
+end
 
+function out = localFormatScalar(val)
+    if isequal(val, '-') || isempty(val)
+        out = '-';
+        return;
+    end
+    if isnumeric(val)
+        if isscalar(val)
+            if abs(val - round(val)) < 1e-12
+                out = sprintf('%d', round(val));
+            else
+                out = sprintf('%.4g', val);
+            end
+        else
+            out = mat2str(val);
+        end
+    else
+        out = string(val);
+    end
+end
+
+function out = localFormatMetric(val)
+    if isempty(val)
+        out = '-';
+    else
+        out = sprintf('%.6e', val);
+    end
+end
+
+function n = localGetOptionalCount(data, field)
+    if isfield(data, field) && ~isempty(data.(field))
+        n = size(data.(field), 1);
+    else
+        n = '-';
+    end
+end
+
+function dim = localResolveInputDim(ModelOpts, data)
+    if isfield(ModelOpts, 'num_vars') && ~isempty(ModelOpts.num_vars)
+        dim = ModelOpts.num_vars;
+    elseif isfield(data, 'X_train') && ~isempty(data.X_train)
+        dim = size(data.X_train, 2);
+    else
+        dim = '-';
+    end
+end
+
+function Indices = localResolveIndices(results, ModelOpts)
+    if isfield(results, 'Indices') && ~isempty(results.Indices)
+        Indices = results.Indices;
+    else
+        Indices = ModelOpts.Indices;
+    end
+end
+
+function localPrintOrthogonality(results, ModelOpts, divider, width)
+    localPrintSection('Orthogonality Diagnostics', width);
+
+    if ~isfield(results, 'univ_vals') || isempty(results.univ_vals)
+        fprintf('[WARN] results.univ_vals not found; skip diagnostics.\n');
+        fprintf('%s\n', divider);
+        return;
+    end
+
+    univ_vals = results.univ_vals;
+    [N_u, M_u, Q_u] = size(univ_vals);
+    Indices = localResolveIndices(results, ModelOpts);
+    p_u = Q_u - 1;
+
+    fprintf('Data: N = %d, M = %d, univ basis max order = %d (Q = %d)\n', N_u, M_u, p_u, Q_u);
+    fprintf('Indices: size = %d x %d\n', size(Indices, 1), size(Indices, 2));
+
+    p_check = ModelOpts.Order;
+    if p_check > p_u
+        p_check = p_u;
+    end
+    nb = p_check + 1;
+    I = eye(nb);
+    froErr = zeros(1, M_u);
+    condEst = zeros(1, M_u);
+
+    for j = 1:M_u
+        Phi = squeeze(univ_vals(:, j, 1:nb));
+        G = (Phi' * Phi) / size(Phi, 1);
+        G = (G + G') / 2;
+        froErr(j) = norm(G - I, 'fro');
+        ev = sort(real(eig(G)), 'ascend');
+        lamMin = ev(1);
+        lamMax = ev(end);
+        if lamMin <= 0
+            condEst(j) = inf;
+        else
+            condEst(j) = lamMax / lamMin;
+        end
+        fprintf('Dim %2d | cond ~ %9.3e | ||G-I||_F = %9.3e\n', j, condEst(j), froErr(j));
+    end
+    fprintf('Summary: max ||G-I||_F = %.3e\n', max(froErr));
+
+    Psi = aPC_PCE_create_Psi(Indices, univ_vals);
+    [N, K] = size(Psi);
+    fprintf('Psi size = %d x %d (N/K = %.3f)\n', N, K, N / max(K, 1));
+    fprintf('rank(Psi) = %g\n', rank(Psi));
+
+    H = Psi' * Psi;
+    fprintf('cond(Psi''Psi) = %.3e\n', cond(H));
+    fprintf('rcond(Psi''Psi) = %.3e\n', rcond(H));
+    try
+        fprintf('condest(Psi''Psi) = %.3e\n', condest(H));
+    catch
+        fprintf('condest(Psi''Psi) = [NA]\n');
+    end
+    coln = sqrt(sum(Psi.^2, 1));
+    fprintf('col-norm: min = %.3e, median = %.3e, max = %.3e\n', min(coln), median(coln), max(coln));
+    try
+        [Q, ~] = qr(Psi, 0);
+        h = sum(Q.^2, 2);
+        fprintf('leverage h: max = %.4f, mean = %.4f, std = %.4f\n', max(h), mean(h), std(h));
+    catch
+        fprintf('leverage h: [WARN] qr(Psi,0) failed.\n');
+    end
+
+    fprintf('%s\n', divider);
 end

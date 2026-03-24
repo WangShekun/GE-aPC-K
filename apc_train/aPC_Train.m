@@ -15,24 +15,23 @@ if ~isfield(ModelOpts, 'qnorm') || isempty(ModelOpts.qnorm)
     ModelOpts.qnorm = 1;
 end
 
+ModelOpts = localValidateModelOpts(ModelOpts);
+
 %% ---------- 标准化 ----------
 [data, map_U] = aPC_PCE_map_to_U(data.X_train, data);
+data.map_U = map_U;
 
 %% ---------- 构造搜索网格 ----------
 grid = aPC_build_search_grid(ModelOpts);
 total = numel(grid);
+parallel_scope = localResolveParallelScope(ModelOpts, total);
 
-if total == 1
-    ModelOpts.Parallel = false;
-end
-
-if ~ModelOpts.Parallel
+if ~strcmp(parallel_scope, 'outer')
 
     %% ---------- 初始化进度条 ----------
     cnt = 0;
     bar_len = 40;
-    fprintf('\n>>>>>>>>            aPC TRAIN BEGIN            <<<<<<<\n\n');
-    fprintf('[aPC_Train] (Serial) Starting search over %d configurations...\n', total);
+    localPrintTrainHeader(parallel_scope, total);
 
     best = struct('score', Inf);
 
@@ -49,27 +48,15 @@ if ~ModelOpts.Parallel
 
         % 当前候选参数（原始版本）
         Mo = grid(gi);
+        Mo.ParallelScope = parallel_scope;
 
-        %% ---------- 降维 ----------
-        if isfield(Mo,'red_dim') && ~isempty(Mo.red_dim)
-            [data_tmp, Mo_tmp, Red_tmp] = aPC_dimReduction(data, Mo);
-        else
-            data_tmp = data;
-            Mo_tmp = Mo;
-            Red_tmp = [];
-            if ~isfield(Mo_tmp,'num_vars') || isempty(Mo_tmp.num_vars)
-                Mo_tmp.num_vars = size(data_tmp.U,2);
-            end
-        end
-
-        % ---------- 构建基函数索引 ----------
-        Mo_tmp.Indices = aPC_GenerateTerms(Mo_tmp);
-        
-        % ---------- 构造多维基函数 ----------
-        [Psi_tmp, poly_tmp, univ_tmp] = aPC_PCE_build_Psi(Mo_tmp, data_tmp);
-
-        % ---------- 回归 ----------
-        res_tmp = aPC_RegressionMethods(Psi_tmp, data_tmp.Y_train, Mo_tmp.RegressionMethod);
+        candidate = aPC_TrainCandidate(data, map_U, Mo);
+        Mo_tmp = candidate.ModelOpts;
+        data_tmp = candidate.data_model;
+        Red_tmp = candidate.ReduceModel;
+        res_tmp = candidate.results;
+        poly_tmp = candidate.poly;
+        univ_tmp = candidate.univ;
 
         %% ---------- 计算搜索准则（仅 LOO） ----------
         score_tmp = res_tmp.LOO;
@@ -92,8 +79,9 @@ if ~ModelOpts.Parallel
         % KPCA,SKPCA 显示 kernel 参数
         extra_str = aPC_kernel_print_str(Mo_tmp);
 
-        fprintf('\r[aPC_Train] [%s] %3d%% \n| RD=%s | rd=%s | p=%d | q=%g%s | LOO=%e\n', ...
-            bar_str, round(pct*100), redm, rd_str, Mo_tmp.Order, Mo_tmp.qnorm, extra_str, score_tmp);
+        fprintf('\r%s\n', localFormatTrainProgress(bar_str, pct, cnt, total));
+        fprintf('| RD=%s | rd=%s | p=%d | q=%g%s | LOO=%e\n', ...
+            redm, rd_str, Mo_tmp.Order, Mo_tmp.qnorm, extra_str, score_tmp);
 
         % ---------- 更新最优 ----------
     if score_tmp < best.score || ~isfinite(best.score)
@@ -106,6 +94,10 @@ if ~ModelOpts.Parallel
             best.ReduceModel= Red_tmp;
             best.choice     = Mo;
             best.U_red      = data_tmp.U;
+            if isfield(data_tmp, 'dY_model')
+                best.dYdX_train = data_tmp.dYdX_train;
+                best.dY_model = data_tmp.dY_model;
+            end
             best.score = score_tmp;
         end
 
@@ -121,6 +113,10 @@ if ~ModelOpts.Parallel
 
     % ===== 保存最佳降维后的 U =====
     data.U_red = best.U_red;
+    if isfield(best, 'dYdX_train')
+        data.dYdX_train = best.dYdX_train;
+        data.dY_model = best.dY_model;
+    end
 
     results.poly_coeffs = best.poly;
     results.univ_vals   = best.univ;
@@ -152,11 +148,11 @@ if ~ModelOpts.Parallel
     end
     
     % --- kernel 信息（仅 KPCA,SKPCA） ---
-    extra_str = aPC_kernel_print_str(Mo);
+    extra_str = aPC_kernel_print_str(mo);
     
     fprintf('[aPC_Train] Best Model: RD=%s | rd=%s | p=%d | q=%g%s | LOO=%e\n', ...
             redm, rd_str, mo.Order, mo.qnorm, extra_str, best.score);
-    fprintf('\n>>>>>>>>             aPC TRAIN END             <<<<<<<\n\n');
+    localPrintTrainFooter();
 
     return;  % 串行版本结束
 end
@@ -164,7 +160,7 @@ end
 %% ============================================================
 %                   并行版本（parallel = true）
 % ============================================================
-fprintf('[aPC_Train] (Parallel) Starting search over %d configurations...\n', total);
+localPrintTrainHeader('outer', total);
 
 % —— 单行进度条 ——
 dq = parallel.pool.DataQueue;
@@ -176,8 +172,7 @@ afterEach(dq, @updateBar);
         pct = cnt / total;
         filled  = round(pct * bar_len);
         bar_str = [repmat('#',1,filled), repmat('-',1,bar_len-filled)];
-        fprintf('\r[aPC_Train] [%s] %3d%%  (%d/%d)', ...
-            bar_str, round(pct*100), cnt, total);
+        fprintf('\r%s', localFormatTrainProgress(bar_str, pct, cnt, total));
     end
 
 % —— 开并行池 ——
@@ -187,7 +182,9 @@ if isempty(gcp('nocreate')), parpool; end
 outs(total) = struct('score', Inf);
 
 parfor gi = 1:total
-    outs(gi) = aPC_evaluateCandidate_score(data, grid(gi));
+    Mo = grid(gi);
+    Mo.ParallelScope = 'serial';
+    outs(gi) = aPC_evaluateCandidate_score(data, Mo);
     send(dq, gi);
 end
 
@@ -197,22 +194,16 @@ fprintf('\n');
 [~, best_idx] = min([outs.score]);
 best_score = outs(best_idx).score;
 best_choice   = grid(best_idx);
+best_choice.ParallelScope = 'serial';
 
 %% —— 串行重训 ——
-Mo = best_choice;
-
-if isfield(Mo,'red_dim') && ~isempty(Mo.red_dim)
-    [data_tmp, Mo_tmp, Red_tmp] = aPC_dimReduction(data, Mo);
-else
-    data_tmp = data; Mo_tmp = Mo; Red_tmp = [];
-    if ~isfield(Mo_tmp,'num_vars') || isempty(Mo_tmp.num_vars)
-        Mo_tmp.num_vars = size(data_tmp.U,2);
-    end
-end
-
-Mo_tmp.Indices = aPC_GenerateTerms(Mo_tmp);
-[Psi, poly_coeffs, univ_vals] = aPC_PCE_build_Psi(Mo_tmp, data_tmp);
-res = aPC_RegressionMethods(Psi, data_tmp.Y_train, Mo_tmp.RegressionMethod);
+candidate = aPC_TrainCandidate(data, map_U, best_choice);
+res = candidate.results;
+Mo_tmp = candidate.ModelOpts;
+Red_tmp = candidate.ReduceModel;
+data_tmp = candidate.data_model;
+poly_coeffs = candidate.poly;
+univ_vals = candidate.univ;
 %% —— 写回最终结果 ——
 results                 = res;
 ModelOpts               = Mo_tmp;
@@ -220,6 +211,10 @@ ReduceModel             = Red_tmp;
 
 % ===== 保存最佳降维后的 U（并行版本）=====
 data.U_red = data_tmp.U;
+if isfield(data_tmp, 'dY_model')
+    data.dYdX_train = data_tmp.dYdX_train;
+    data.dY_model = data_tmp.dY_model;
+end
 
 results.poly_coeffs     = poly_coeffs;
 results.univ_vals       = univ_vals;
@@ -251,10 +246,11 @@ else
 end
 
 % --- kernel 信息（仅 KPCA,SKPCA） ---
-extra_str = aPC_kernel_print_str(Mo);
+extra_str = aPC_kernel_print_str(mo);
 
 fprintf('[aPC_Train] Best Model: RD=%s | rd=%s | p=%d | q=%g%s | LOO=%e\n', ...
         redm, rd_str, mo.Order, mo.qnorm, extra_str, best_score);
+localPrintTrainFooter();
 end
 
 %% 打印KPCA和SKPCA的核信息
@@ -274,4 +270,100 @@ if any(strcmp(m, {'kpca','skpca_hsic'}))
 else
     s = '';
 end
+end
+
+function ModelOpts = localValidateModelOpts(ModelOpts)
+    if ~isfield(ModelOpts, 'aPC_Method') || isempty(ModelOpts.aPC_Method)
+        ModelOpts.aPC_Method = 'stieltjes';
+    end
+
+    if ~isfield(ModelOpts, 'ModelType') || isempty(ModelOpts.ModelType)
+        error('aPC:MissingModelType', 'ModelOpts.ModelType is required: apc | apck | geapck.');
+    end
+
+    model_type = lower(strtrim(ModelOpts.ModelType));
+    valid_model_types = {'apc', 'apck', 'geapck'};
+    if ~any(strcmp(model_type, valid_model_types))
+        error('aPC:InvalidModelType', 'Unsupported ModelType: %s', ModelOpts.ModelType);
+    end
+
+    if any(strcmp(model_type, {'apck', 'geapck'}))
+        if ~isfield(ModelOpts, 'PCKType') || isempty(ModelOpts.PCKType)
+            error('aPC:MissingPCKType', 'ModelOpts.PCKType is required for APCK/GEAPCK.');
+        end
+        pck_type = lower(strtrim(ModelOpts.PCKType));
+        if ~any(strcmp(pck_type, {'sequential', 'optimal'}))
+            error('aPC:InvalidPCKType', 'Unsupported PCKType: %s', ModelOpts.PCKType);
+        end
+    end
+end
+
+function scope = localResolveParallelScope(ModelOpts, total)
+    if ~isfield(ModelOpts, 'Parallel') || ~ModelOpts.Parallel
+        scope = 'serial';
+        return;
+    end
+
+    model_type = lower(strtrim(ModelOpts.ModelType));
+    if strcmp(model_type, 'apc')
+        scope = localPickScope(total > 1, 'outer', 'serial');
+        return;
+    end
+
+    pck_type = lower(strtrim(ModelOpts.PCKType));
+    if strcmp(pck_type, 'sequential')
+        scope = localPickScope(total > 1, 'outer', 'serial');
+    else
+        scope = localPickScope(total > 1, 'outer', 'trend');
+    end
+end
+
+function out = localPickScope(cond, a, b)
+if cond
+    out = a;
+else
+    out = b;
+end
+end
+
+function label = localParallelScopeLabel(scope)
+    switch lower(scope)
+        case 'serial'
+            label = 'Serial';
+        case 'trend'
+            label = 'Trend-Parallel';
+        case 'outer'
+            label = 'Parallel';
+        otherwise
+            label = scope;
+    end
+end
+
+function localPrintTrainHeader(scope, total)
+    fprintf('\n%s\n', localTrainDivider('BEGIN'));
+    fprintf('[aPC_Train] (%s) Evaluating %d configuration(s)...\n', ...
+        localParallelScopeLabel(scope), total);
+end
+
+function localPrintTrainFooter()
+    fprintf('\n%s\n\n', localTrainDivider('END'));
+end
+
+function line = localTrainDivider(label)
+    width = localTrainLogWidth() - strlength('[aPC_Train] ');
+    core = sprintf(' aPC TRAIN %s ', upper(label));
+    pad_total = max(0, width - strlength(core));
+    left = floor(pad_total / 2);
+    right = pad_total - left;
+    line = ['[aPC_Train] ' repmat('=', 1, left) core repmat('=', 1, right)];
+end
+
+function line = localFormatTrainProgress(bar_str, pct, cnt, total)
+    width = localTrainLogWidth();
+    raw = sprintf('[aPC_Train] [%s] %3d%%  (%d/%d)', bar_str, round(pct * 100), cnt, total);
+    line = sprintf(['%-' num2str(width) 's'], raw);
+end
+
+function width = localTrainLogWidth()
+    width = 84;
 end

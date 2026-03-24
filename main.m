@@ -1,55 +1,83 @@
 clear; clc; close all;
-rng(80);
+% rng(80);
 
+repo_root = fileparts(mfilename('fullpath'));
+addpath(fullfile(repo_root, 'core'));
 aPC
 
 ModelOpts = struct();
-ModelOpts.Order    = [14];      % 最大多项式阶数
-ModelOpts.qnorm    = [0.9];       % q-norm 
 
-% ModelOpts.ReductionMethod = 'mcp';
-% ModelOpts.red_dim  = [5];
+% === 基础多项式设置 ===
+ModelOpts.Order = [5];                  % 多项式总阶数 p；可设为标量或搜索向量
+ModelOpts.qnorm = [0.7];                 % q-norm 截断参数；越小越稀疏
+ModelOpts.aPC_Method = 'stieltjes';      % 一维 aPC 构造方法：'2012' | '2018' | 'stieltjes'
+ModelOpts.RegressionMethod = 'lars';     % APC trend 的回归器：通常用 'lars'
 
-% ModelOpts.kernel_type   = {'gaussian'};
-% ModelOpts.kernel_gamma  = [0.1];
-% ModelOpts.kernel_degree = [2];
-% ModelOpts.kernel_offset = [1];
+% === 模型选择设置 ===
+ModelOpts.ModelType = 'apck';          % 模型类型：'apc' | 'apck' | 'geapck'
+ModelOpts.PCKType = 'optimal';           % PCK 策略：'sequential' | 'optimal'
+% ModelOpts.GradientMode = 'provided';     % GEAPCK 梯度来源：'provided' | 'finite-difference' | 'auto'
+ModelOpts.Parallel = 0;                  % 是否并行搜索候选配置：0/1
 
-% ModelOpts.label_kernel_type = {'gaussian'};
-% ModelOpts.label_kernel_gamma  = [1/128^2];
+% === 降维设置 ===
+ModelOpts.ReductionMethod = 'pls';     % 降维方法：'pls' | 'pca' | 'kpca' | 'mcp' | 'ica' | 'rp' | ...
+ModelOpts.red_dim = [6];               % 降维后的目标维数；可设为标量或搜索向量
 
-% ModelOpts.mcp_opts.maxIter = 3000;
-% ModelOpts.mcp_opts.whiten = 1;
-% ModelOpts.mcp_opts.alpha_cov = 1.0;
-% ModelOpts.mcp_opts.max_moment_order = [6];
-% ModelOpts.mcp_opts.moment_base = 1.0;
-% ModelOpts.mcp_opts.moment_decay = [0.6];
-% ModelOpts.mcp_opts.lambda_y = [0.05];
-% ModelOpts.mcp_opts.supervision_mode = 'pls';
-% ModelOpts.mcp_opts.manopt_solver = 'rlbfgs';
+% === KPCA / SKPCA 输入核设置 ===
+% ModelOpts.kernel_type = {'gaussian'};  % 输入核类型
+% ModelOpts.kernel_gamma = [0.1];        % 高斯/拉普拉斯等核的尺度参数
+% ModelOpts.kernel_degree = [2];         % 多项式核次数
+% ModelOpts.kernel_offset = [1];         % 多项式核偏置项
 
-% ModelOpts.ica_approach      = 'symm';
-% ModelOpts.ica_fun           = 'tanh';
-% ModelOpts.ica_a1            = 1.0;        % tanh 尺度
-% ModelOpts.ica_epsilon       = 1e-4;
-% ModelOpts.ica_maxIter       = 200;
-% ModelOpts.ica_mu             = 1.0;
-% ModelOpts.ica_stabilization  = 'on';
-% ModelOpts.ica_whiten_solver = 'svd';
-% ModelOpts.ica_verbose       = 0;
+% === SKPCA 标签核设置 ===
+% ModelOpts.label_kernel_type = {'gaussian'}; % 标签核类型
+% ModelOpts.label_kernel_gamma = [1/128^2];   % 标签核尺度参数
 
-% ModelOpts.rp_type         = 'gaussian';   % 默认 & 最常见
-% ModelOpts.rp_scale        = 'jl';          % Johnson–Lindenstrauss 缩放
+% === MCP 设置 ===
+% ModelOpts.mcp_opts.maxIter = 3000;          % MCP 最大迭代次数
+% ModelOpts.mcp_opts.whiten = 1;              % 是否对输入先白化
+% ModelOpts.mcp_opts.alpha_cov = 1.0;         % 协方差项权重
+% ModelOpts.mcp_opts.max_moment_order = [6];  % 矩信息最高阶数
+% ModelOpts.mcp_opts.moment_base = 1.0;       % 矩权重基数
+% ModelOpts.mcp_opts.moment_decay = [0.6];    % 高阶矩衰减率
+% ModelOpts.mcp_opts.lambda_y = [0.05];       % 监督项权重
+% ModelOpts.mcp_opts.supervision_mode = 'pls';% 监督模式
+% ModelOpts.mcp_opts.manopt_solver = 'rlbfgs';% MCP 优化器
 
-ModelOpts.aPC_Method = 'stieltjes';      % 可选 '2012' | '2018' | 'stieltjes'
-ModelOpts.RegressionMethod = 'lars';
-ModelOpts.Parallel = 0;
+% === ICA 设置 ===
+% ModelOpts.ica_approach = 'symm';            % ICA 求解方式：'symm' | 'defl'
+% ModelOpts.ica_fun = 'tanh';                 % 非线性函数：'tanh' | 'gauss' | 'pow3'
+% ModelOpts.ica_a1 = 1.0;                     % tanh 非线性尺度参数
+% ModelOpts.ica_epsilon = 1e-4;               % 收敛阈值
+% ModelOpts.ica_maxIter = 200;                % 最大迭代次数
+% ModelOpts.ica_mu = 1.0;                     % 阻尼/步长参数
+% ModelOpts.ica_stabilization = 'on';         % 是否启用稳定化
+% ModelOpts.ica_whiten_solver = 'svd';        % 白化求解器：'svd' | 'eig'
+% ModelOpts.ica_verbose = 0;                  % ICA 过程是否输出信息
+
+% === 随机投影设置 ===
+% ModelOpts.rp_type = 'gaussian';             % 随机投影矩阵类型：'gaussian' | 'rademacher'
+% ModelOpts.rp_scale = 'jl';                  % 是否做 Johnson-Lindenstrauss 缩放：'jl' | 'none'
+
+% === APCK / GEAPCK Kriging 设置 ===
+ModelOpts.KrigingOpts.corr = 'gaussian';      % 相关函数类型：'gaussian' | 'exponential' | 'matern32'
+ModelOpts.KrigingOpts.theta0 = 1.0;           % 长度尺度初值；标量时自动扩展到各维
+ModelOpts.KrigingOpts.theta_lb = 1e-3;        % 长度尺度下界
+ModelOpts.KrigingOpts.theta_ub = 1e2;         % 长度尺度上界
+ModelOpts.KrigingOpts.nugget = 1e-8;          % nugget 正则项，改善数值稳定性
+ModelOpts.KrigingOpts.max_trend_terms = [0.1, 0.8]; % trend 路径比例区间；例如 [0.1,0.8] 表示在前 10%~80% 中选优
+ModelOpts.KrigingOpts.optimize_theta = true;  % 是否优化 Kriging 长度尺度
+ModelOpts.KrigingOpts.DisplayProgress = true; % 是否显示 sequential/optimal 的内部进度
+
+% === GE 数值梯度回退设置 ===
+% ModelOpts.FDOpts.type = 'forward';          % 差分类型：'forward' | 'central'
+% ModelOpts.FDOpts.step = 1e-6;               % 相对步长，用于自动数值梯度
 
 uqlab
 
-InputOpts = ishigami_Input;
+% InputOpts = ishigami_Input;
 
-% InputOpts = wingweight_Input;
+InputOpts = wingweight_Input;
 
 % InputOpts = morris10_Input;
 
@@ -61,18 +89,28 @@ InputOpts = ishigami_Input;
 myInput = uq_createInput(InputOpts);
 
 data = struct();
-data.X_train = uq_getSample(myInput, 2000);
-data.Y_train = ishigami(data.X_train);
+data.X_train = uq_getSample(myInput, 500);
+data.Y_train = wingweight(data.X_train);
 
-data.X_val   = uq_getSample(myInput, 10000);
-data.Y_val   = ishigami(data.X_val);
+% Ishigami 解析梯度（用于 GEAPCK）
+x1 = data.X_train(:,1);
+x2 = data.X_train(:,2);
+x3 = data.X_train(:,3);
+data.dYdX_train = [ ...
+    cos(x1) .* (1 + 0.1 .* x3.^4), ...
+    14 .* sin(x2) .* cos(x2), ...
+    0.4 .* x3.^3 .* sin(x1) ...
+];
+
+data.X_val   = uq_getSample(myInput, 4000);
+data.Y_val   = wingweight(data.X_val);
 
 %% 
 MetaOpts_OLS.Type = 'MetaModel';
 MetaOpts_OLS.MetaType = 'PCE';
 MetaOpts_OLS.Method = 'lars';
-MetaOpts_OLS.TruncOptions.qNorm = 0.9;
-MetaOpts_OLS.Degree = 14;
+MetaOpts_OLS.TruncOptions.qNorm = 0.7;
+MetaOpts_OLS.Degree = 8;
 MetaOpts_OLS.ExpDesign.X = data.X_train;
 MetaOpts_OLS.ExpDesign.Y = data.Y_train;
 MetaOpts_OLS.Display = 0;
@@ -99,15 +137,10 @@ results.RelMSE = sum((data.Y_pred - data.Y_val).^2) / ...
 aPC_print(results, ModelOpts, data);
 % aPC_plot(data, results, ModelOpts, "all");
 
-%% 不确定性量化
-UQ = aPC_ComputeUQ(results, data);
-aPC_printUQ(UQ);
+%% 不确定性量化（可选）
+% UQ = aPC_ComputeUQ(results, data);
+% aPC_printUQ(UQ);
 % aPC_PlotUQ(UQ, data);
-
-aPC_error = [abs(UQ.mean-mean(data.Y_val))/mean(data.Y_val) ...
-    ;abs(UQ.var-var(data.Y_val))/var(data.Y_val)]
-PCE_error = [abs(myPCE_OLS.PCE.Moments.Mean-mean(data.Y_val))/mean(data.Y_val) ...
-    ;abs(myPCE_OLS.PCE.Moments.Var-var(data.Y_val))/var(data.Y_val)]
 
 %% 灵敏度分析
 % SA = aPC_ComputeSensitivity(results, ModelOpts);
