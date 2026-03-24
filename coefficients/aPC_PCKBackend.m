@@ -22,6 +22,11 @@ function results = aPC_PCKBackend(Psi, data_model, ModelOpts, basis_info)
     KrigingOpts = localSetDef(KrigingOpts, 'optimize_theta', false);
     KrigingOpts = localSetDef(KrigingOpts, 'DisplayProgress', false);
 
+    parallel_scope = 'serial';
+    if isfield(ModelOpts, 'ParallelScope') && ~isempty(ModelOpts.ParallelScope)
+        parallel_scope = lower(strtrim(ModelOpts.ParallelScope));
+    end
+
     Y = data_model.Y_train(:);
     U = data_model.U;
     [N, d] = size(U);
@@ -64,30 +69,34 @@ function results = aPC_PCKBackend(Psi, data_model, ModelOpts, basis_info)
 
     best = struct('loo', inf);
     theta_prev = [];
-    for i = 1:numel(trend_sizes)
-        % Search nested trend models following the LARS entry order.
-        trend_idx = lars_order(1:trend_sizes(i));
-        F = Psi_sub(:, trend_idx);
-        dF = [];
-        if use_ge
-            dF = localBuildTrendGradientMatrix(U_sub, basis_info, idx_sub, trend_idx);
+    if strcmp(parallel_scope, 'trend') && strcmp(pck_type, 'optimal') && numel(trend_sizes) > 1
+        models = cell(1, numel(trend_sizes));
+        dq = parallel.pool.DataQueue;
+        cnt = 0;
+        bar_len = 30;
+        afterEach(dq, @updateTrendBar);
+        parfor i = 1:numel(trend_sizes)
+            models{i} = localEvaluateTrend(trend_sizes(i), i, numel(trend_sizes), 'parallel', lars_order, Psi_sub, U_sub, Y_sub, G_sub, ...
+                basis_info, idx_sub, KrigingOpts, use_ge, []);
+            send(dq, i);
         end
+        fprintf('\n');
+        loo_vals = cellfun(@(m) m.loo, models);
+        [~, best_idx] = min(loo_vals);
+        best = models{best_idx};
+    else
+        for i = 1:numel(trend_sizes)
+            theta_init = [];
+            if strcmp(pck_type, 'sequential') && ~isempty(theta_prev)
+                theta_init = theta_prev;
+            end
+            model_i = localEvaluateTrend(trend_sizes(i), i, numel(trend_sizes), 'serial', lars_order, Psi_sub, U_sub, Y_sub, G_sub, ...
+                basis_info, idx_sub, KrigingOpts, use_ge, theta_init);
+            theta_prev = model_i.theta;
 
-        if KrigingOpts.DisplayProgress
-            fprintf('[aPC_PCKBackend] %s | %s | trend %d/%d\n', ...
-                upper(model_type), upper(pck_type), i, numel(trend_sizes));
-        end
-
-        theta_init = [];
-        if strcmp(pck_type, 'sequential') && ~isempty(theta_prev)
-            theta_init = theta_prev;
-        end
-        model_i = localFitOne(F, dF, Y_sub, U_sub, G_sub, KrigingOpts, theta_init, use_ge);
-        model_i.trend_idx = trend_idx;
-        theta_prev = model_i.theta;
-
-        if model_i.loo < best.loo
-            best = model_i;
+            if model_i.loo < best.loo
+                best = model_i;
+            end
         end
     end
 
@@ -105,7 +114,43 @@ function results = aPC_PCKBackend(Psi, data_model, ModelOpts, basis_info)
     results.PCKModel.corr = KrigingOpts.corr;
     results.PCKModel.nugget = KrigingOpts.nugget;
     results.PCKModel.use_ge = use_ge;
+    results.PCKModel.parallel_scope = parallel_scope;
     results.basis_info = basis_info;
+
+    function updateTrendBar(~)
+        cnt = cnt + 1;
+        fprintf('\r%s', localFormatTrendProgress('parallel', cnt, numel(trend_sizes), bar_len));
+    end
+end
+
+function model_i = localEvaluateTrend(trend_size, trend_pos, trend_total, progress_mode, lars_order, Psi_sub, U_sub, Y_sub, G_sub, ...
+        basis_info, idx_sub, KrigingOpts, use_ge, theta_init)
+    % Evaluate one trend size from the nested LARS path.
+    trend_idx = lars_order(1:trend_size);
+    F = Psi_sub(:, trend_idx);
+    dF = [];
+    if use_ge
+        dF = localBuildTrendGradientMatrix(U_sub, basis_info, idx_sub, trend_idx);
+    end
+
+    if KrigingOpts.DisplayProgress && strcmp(progress_mode, 'serial')
+        fprintf('%s\n', localFormatTrendProgress('serial', trend_pos, trend_total, 30));
+    end
+
+    model_i = localFitOne(F, dF, Y_sub, U_sub, G_sub, KrigingOpts, theta_init, use_ge);
+    model_i.trend_idx = trend_idx;
+end
+
+function line = localFormatTrendProgress(mode, trend_pos, trend_total, bar_len)
+    pct = trend_pos / trend_total;
+    filled = round(pct * bar_len);
+    bar_str = [repmat('#', 1, filled), repmat('-', 1, bar_len - filled)];
+    label = 'Trend-Serial';
+    if strcmpi(mode, 'parallel')
+        label = 'Trend-Parallel';
+    end
+    line = sprintf('[aPC_PCKBackend] [%s] trend %d/%d [%s] %3d%%', ...
+        label, trend_pos, trend_total, bar_str, round(pct * 100));
 end
 
 function model = localFitOne(F, dF, Y, U, G, KrigingOpts, theta_init, use_ge)

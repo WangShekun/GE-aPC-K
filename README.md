@@ -1,280 +1,167 @@
-# Arbitrary Polynomial Chaos Expansion (aPCE) Framework
+# aPC 代理建模框架使用手册
 
-This repository is a modular MATLAB implementation of arbitrary Polynomial Chaos Expansion for:
+这份文档不是仓库简介，也不是若干配置项的简单罗列，而是一本面向使用者、研究者与后续维护者的中文手册。你可以把它理解成这套 MATLAB aPC 框架的“长期说明书”：它不仅告诉你有哪些功能，更会解释这些功能为什么存在、它们之间是什么关系、什么时候应该选哪种模型、为什么某些配置会变慢、为什么有些设置会带来数值上的微小差异，以及当你想扩展这套框架时应该从哪里入手。若你是第一次接触这套代码，建议从头顺序阅读；若你已经熟悉基本流程，也可以把它当成检索式手册，在需要的时候按章节跳转。
 
-- surrogate modeling,
-- uncertainty quantification (UQ),
-- global sensitivity analysis (GSA),
-- and hybrid PCE-Kriging variants (APCK / GEAPCK).
+从整体定位上说，这个项目实现的是一套以 arbitrary Polynomial Chaos 为核心的代理建模框架。它服务的典型任务包括：根据训练样本建立代理模型、在验证集上评估近似精度、通过解析或近似方式计算统计量、给出 Sobol 灵敏度分析结果，以及在更复杂的场景中将多项式趋势与 Kriging 残差模型组合成 APCK 或 GEAPCK。与很多只停留在“多项式回归”层面的项目不同，这套代码已经把模型族、降维、超参数搜索、梯度处理、并行执行与结果打印串成一条完整工作流。因此，它既可以作为研究型算法平台，也可以作为你做 benchmark、比较模型、测试新想法的基础框架。
 
-It supports automatic hyperparameter search, multiple regression backends, optional dimension reduction, and unified prediction.
+手册的主线逻辑可以用一句话概括：输入原始样本，先进入标准化空间，再根据配置决定是否做降维、是否只做 APC、是否叠加 Kriging、是否进一步利用梯度，最后通过留一误差在多个候选模型中自动选择最优者。这听上去像一个多阶段管线，而事实也确实如此。理解了这条主线，后面所有参数、文件结构、并行设计和打印输出都会变得容易理解。
 
-## Quick Start
+## 一、这套框架到底在解决什么问题
 
-```matlab
-repo_root = fileparts(mfilename('fullpath'));
-addpath(fullfile(repo_root, 'core'));
-aPC;
+很多工程模型或数值模拟器都存在一个共同问题：单次评估代价高，但你又需要大量样本去做不确定性传播、灵敏度分析或者设计空间探索。直接用原始模型做大规模 Monte Carlo 往往成本过高，因此就需要一个近似但便宜的代理模型。PCE 是一种非常经典的代理建模方法，它用多项式基来逼近输入与输出之间的关系。这个仓库中的“aPC”比传统 PCE 更进一步，它允许在更灵活的分布和数值流程下构造多项式基，并通过回归来求解系数。
 
-run("main.m")           % single-run script
-% or
-run("main_compare.m")   % benchmark-style model comparison
-```
+如果目标函数足够平滑、维度不高、趋势结构比较明确，那么纯 APC 往往已经够用。但当目标函数存在明显局部结构、纯多项式难以兼顾全局与局部精度时，APCK 会比 APC 更有优势。APCK 的思想不是放弃多项式，而是保留多项式 trend，再让 Kriging 去拟合剩余残差。这样，PCE 保持了全局结构上的表达能力，Kriging 则补上了局部修正能力。进一步地，如果训练样本处的响应梯度也可获得，那么 GEAPCK 还可以把梯度值一起纳入训练，使模型在局部变化趋势上更加准确。正因为有这三类模型并存，这个项目不是某种单点算法，而是一套可以逐步升级精度和复杂度的建模体系。
 
-## End-to-End Pipeline
+从用户视角看，这套框架的价值主要体现在三点。第一，它把 APC、APCK、GEAPCK 放在了同一套接口下，你不需要为不同方法重写一整套训练与预测代码。第二，它把高维问题中经常需要的降维能力纳入了统一流程，因此可以比较自然地处理从低维到中高维的任务。第三，它把模型选择放进了训练本身，也就是说你不仅是在“拟合一个模型”，更是在“比较一组候选模型并选出最好的一组设置”。
 
-Training (`aPC_Train`):
-
-1. Standardize `X_train` to `U` (`aPC_PCE_map_to_U`)
-2. Optional dimension reduction (`aPC_dimReduction`)
-3. Build multi-index terms (`aPC_GenerateTerms`)
-4. Build polynomial basis matrix `Psi`
-5. Fit model (APC or APCK/GEAPCK backend)
-6. Select best config by LOO over search grid
-
-Prediction (`aPC_Predict`):
+## 二、从零开始：如何真正跑通一次实验
 
-1. Apply saved standardization mapping
-2. Apply saved reduction transform (if any)
-3. Rebuild basis
-4. Predict with APC or PCK backend
+如果你的目标只是先把代码跑起来，那么最直接的入口是 `main.m`。这个脚本更接近单次实验脚本：你在这里设置 `ModelOpts`、选择一个 benchmark 输入分布、生成训练数据和验证数据，随后调用 `aPC_Train` 与 `aPC_Predict`。这条路径最适合“我想先看一下某个模型能不能工作”“我想临时试一个参数组合”“我想在某个 benchmark 上观察一次训练输出”的场景。
 
-## Model Families
-
-- `apc`: pure arbitrary PCE regression
-- `apck`: PCE trend + Kriging residual correction
-- `geapck`: gradient-enhanced APCK
-
-Important:
-
-- `PCKType` is required for `apck` and `geapck` (`sequential` or `optimal`)
-- `aPC_ComputeUQ` and `aPC_ComputeSensitivity` currently support `apc` only
-
-## Full Configuration Reference (`ModelOpts`)
-
-All options below are supported by current code paths.
-
-### 1) Core PCE Options
-
-- `Order` (numeric scalar or vector)
-  - maximum total polynomial degree
-- `qnorm` (numeric scalar or vector)
-  - q-norm truncation parameter for multi-index generation
-- `aPC_Method` (string)
-  - supported: `'2012'`, `'2018'`, `'stieltjes'`
-- `RegressionMethod` (string, case-insensitive)
-  - supported: `'ols'`, `'lars'`, `'lasso'`, `'ridge'`, `'omp'`
-- `Parallel` (0/1)
-  - whether to evaluate search candidates in parallel
+如果你的目标是比较方法，例如把 UQLab 的 PCE、APC、APCK、GEAPCK 放在同一批数据上对照，那么更适合用 `main_compare.m`。这个脚本会统一生成训练集和验证集，然后依次运行四种模型，并输出训练时间、预测时间、总耗时、相对均方误差和 LOO。它不仅适合做方法对比，也很适合检查新改动有没有把速度或精度搞坏。特别是当你对并行、梯度或降维逻辑做了修改时，`main_compare.m` 是很好的烟雾测试入口。
 
-### 2) Model-Type Options
+在运行任何脚本之前，应该先在 MATLAB 中把工作目录切到仓库根目录，然后执行 `aPC`。这个函数位于 `core/aPC.m`，负责把整个项目的模块路径加入 MATLAB 搜索路径。这个步骤不能省，因为框架内部的函数分散在 `basis`、`apc_train`、`coefficients`、`dimreduct`、`predict`、`UQ`、`sensitivity`、`utils` 等多个目录下。之后如果你的脚本依赖 UQLab 的输入构造或基线 PCE，还需要执行 `uqlab`。在当前仓库中，`main.m` 与 `main_compare.m` 都默认假设 UQLab 已经可用。
 
-- `ModelType` (required)
-  - `'apc'` | `'apck'` | `'geapck'`
-- `PCKType` (required when `ModelType` is `apck` or `geapck`)
-  - `'sequential'` | `'optimal'`
-- `GradientMode` (GEAPCK only)
-  - `'provided'` | `'finite-difference'` | `'auto'`
+## 三、你真正传给框架的是什么：data 与 ModelOpts
 
-### 3) Dimension Reduction Options
+这套框架的训练接口核心上只接收两个对象：`data` 和 `ModelOpts`。`data` 描述你手头的数据，`ModelOpts` 描述你想训练什么样的模型。虽然这是一个很简单的接口形式，但也正是因为它简单，里面的字段含义必须非常清楚。
 
-- `ReductionMethod`
-  - supported: `'pls'`, `'pca'`, `'kpca'`, `'spca_hsic'`, `'skpca_hsic'`, `'mcp'`, `'ica'`, `'rp'`
-- `red_dim`
-  - target reduced dimension
-  - `kpca` / `skpca_hsic`: supports integer `>1` or ratio `(0,1)` for explained-components mode
+`data` 最少需要两个字段：`data.X_train` 和 `data.Y_train`。`X_train` 的形状约定为 `N x M`，也就是有 `N` 个样本、`M` 个输入维度；`Y_train` 的形状为 `N x 1`。这个形状约定在整个仓库中都是统一的，后面的标准化、降维、基矩阵构造、回归、PCK 后端、预测和统计模块都默认遵守这一约定。为了在训练后直接评估误差，你通常还会提供 `data.X_val` 和 `data.Y_val`。如果不提供验证集，训练仍然可以完成，但 `RelMSE` 这类指标就无法在同一次脚本里直接给出。
 
-Note:
+当你使用 GEAPCK 并且手头有解析梯度时，还应提供 `data.dYdX_train`。这是一个非常关键的字段，形状必须是 `N x M`，第 `i` 行表示第 `i` 个训练样本处对所有输入变量的一阶偏导数，第 `j` 列对应 `∂y/∂x_j`。很多人第一次接触 GEAPCK 时会误以为“是不是只要给一个导数”或者“是不是还要混合偏导”，其实都不是。当前实现只需要每个训练点处的梯度向量，不需要二阶导，也不需要交叉偏导。
 
-- After reduction, framework performs second standardization automatically and reuses it in prediction.
+如果你没有解析梯度，但仍然想跑 GEAPCK，那么可以让框架通过有限差分估计梯度。此时 `data` 中应包含 `data.ModelFcn`，也就是一个能把输入样本映射成响应值的函数句柄。这样，`aPC_FDGradients` 就能通过扰动各维输入、重复调用模型函数来近似 `dY/dX`。这类差分梯度是现实中非常常见的替代方案，但一定要记住，它的代价本质上是“更多次函数评估”，因此速度通常比提供解析梯度慢很多。
 
-### 4) Kernel Options (KPCA / SKPCA-HSIC)
+`ModelOpts` 则定义了模型配置。最核心的字段是 `Order`、`qnorm`、`aPC_Method`、`RegressionMethod` 和 `ModelType`。如果你想要纯 APC，那么这几项基本上就够了。如果你要 APCK 或 GEAPCK，就还必须补充 `PCKType` 和 `KrigingOpts`。如果你想启用降维，还要设置 `ReductionMethod` 和 `red_dim`。如果你希望某些参数由训练器自动搜索，可以直接把这些字段写成向量，例如 `Order=[4 5 6]` 或 `qnorm=[0.5 0.7 1.0]`。训练时，框架会自动生成搜索网格，并用 LOO 最小作为模型选择准则。
 
-- Input kernel (X-space):
-  - `kernel_type`
-  - `kernel_gamma`
-  - `kernel_degree`
-  - `kernel_offset`
-- Label kernel (Y-space, supervised KPCA):
-  - `label_kernel_type`
-  - `label_kernel_gamma`
-  - `label_kernel_degree`
-  - `label_kernel_offset`
+## 四、训练阶段到底发生了什么
 
-### 5) MCP Options (`mcp_opts`)
+理解 `aPC_Train` 的内部流程，对于理解整套框架至关重要。训练的第一步是标准化。原始输入 `X_train` 会被映射到一个标准化的 `U` 空间，这一步由 `aPC_PCE_map_to_U` 完成。这样做的好处是显然的：不同输入维度的尺度被统一后，多项式基构造更稳定，Kriging 长度尺度优化也更可控，梯度传递在后续步骤中也更清楚。
 
-- `mcp_opts.maxIter`
-- `mcp_opts.whiten`
-- `mcp_opts.alpha_cov`
-- `mcp_opts.max_moment_order`
-- `mcp_opts.moment_base`
-- `mcp_opts.moment_decay`
-- `mcp_opts.lambda_y`
-- `mcp_opts.supervision_mode`
-- `mcp_opts.manopt_solver`
+第二步是可选降维。若 `ModelOpts` 中没有指定降维方法，训练就直接在 `U` 空间继续；若指定了 `ReductionMethod` 与 `red_dim`，则会在 `aPC_dimReduction` 中把 `U` 投影到更低维的模型空间中。这个过程完成之后，框架还会进行二次标准化。这一点经常被忽视，但其实是整个预测一致性的关键：预测阶段必须沿着完全相同的 `X -> U -> U_red -> U_red_std` 链路走，才能保证训练和预测使用的是同一个模型空间。
 
-### 6) ICA Options
+第三步是多项式项生成与基矩阵构造。训练器会根据 `Order` 和 `qnorm` 调用 `aPC_GenerateTerms` 生成多指标项，再用 `aPC_PCE_build_Psi` 或相关函数构造设计矩阵 `Psi`。这一步的结果直接决定了“多项式部分”能表达哪些阶数和哪些交互项。对于纯 APC，后续基本就是在 `Psi` 上做回归；对于 APCK/GEAPCK，则这一步只是给出一个候选 trend 空间，真正的残差模型还要交给 PCK 后端。
 
-- `ica_approach`: `'symm'` | `'defl'`
-- `ica_fun`: `'tanh'` | `'gauss'` | `'pow3'`
-- `ica_a1`, `ica_a2`
-- `ica_epsilon`
-- `ica_maxIter`
-- `ica_mu`
-- `ica_stabilization`: `'on'` | `'off'`
-- `ica_whiten_solver`: `'svd'` | `'eig'`
-- `ica_seed`
-- `ica_verbose`
+第四步是模型拟合。若 `ModelType='apc'`，训练器会调用 `aPC_RegressionMethods`，按照 `RegressionMethod` 的设定求出系数；若是 `apck` 或 `geapck`，则调用 `aPC_PCKBackend`。在 APCK/GEAPCK 中，PCK 后端首先利用 LARS 得到一个趋势项进入顺序，然后在这条路径上枚举多个 trend 大小。每个 trend 大小都对应一个多项式趋势矩阵 `F`，而 GEAPCK 还会对应一个 trend 的梯度矩阵 `dF`。随后，后端针对每个候选 trend 拟合一个 Kriging/PCK 模型，计算近似的 LOO，并从中选出最优的那个。
 
-### 7) Random Projection (RP) Options
+最后一步是模型选择。对于纯 APC，LOO 和改进 LOO 等指标会用来决定哪个超参数组合最好；对于 APCK/GEAPCK，最关键的准则仍然是 LOO，只不过这里的 LOO 已经是 Kriging 体系里的近似公式，而不是简单沿用纯 PCE 的 LOO。换句话说，训练器最终保留的不是“最后训练的模型”，而是“在所有候选配置中 LOO 最小的模型”。这个设计决定了整个框架天然适合做超参数搜索与方法比较。
 
-- `rp_type`: `'gaussian'` | `'rademacher'`
-- `rp_scale`: `'jl'` | `'none'`
-- `rp_seed`
+## 五、三类模型如何选择：APC、APCK、GEAPCK
 
-### 8) Kriging Options (`KrigingOpts`) for APCK/GEAPCK
+如果你只是想先建立一个稳定、便宜、可解释的代理模型，优先选 APC。APC 的优势在于训练快、结构清晰、与 UQ 和灵敏度分析模块兼容最好。它特别适合做代理建模的基线方法，也适合在高维问题中先摸清多项式阶数、q-norm、降维设置等基本配置。对很多中等复杂度问题而言，APC 已经能达到相当不错的效果。
 
-- `KrigingOpts.corr`: `'gaussian'` | `'exponential'` | `'matern32'`
-  - GEAPCK currently restricts correlation to `'gaussian'`
-- `KrigingOpts.nugget`
-- `KrigingOpts.theta0`
-- `KrigingOpts.theta_lb`
-- `KrigingOpts.theta_ub`
-- `KrigingOpts.optimize_theta` (true/false)
-- `KrigingOpts.max_trend_terms`
-  - scalar or two-element vector
-  - if value `<=1`, interpreted as fraction of LARS trend path
-  - if value `>1`, interpreted as absolute term count
-- `KrigingOpts.DisplayProgress` (true/false)
+如果你发现纯 APC 的相对误差已经遇到瓶颈，而函数响应中明显存在局部结构或残差模式，那么就可以考虑 APCK。它保留了多项式趋势项的全局表达能力，又让 Kriging 去拟合局部残差。一般来说，APCK 的精度潜力高于 APC，但训练代价也显著上升，因为每一个候选 trend 都要做一遍 Kriging 拟合和长度尺度优化。因此，APCK 更适合在你已经有一个较稳健的 APC 基线之后，再做精度提升。
 
-### 9) Finite-Difference Gradient Options (`FDOpts`)
+GEAPCK 则适合在你不仅关心函数值拟合，还希望把局部导数信息一起纳入建模的时候使用。如果梯度可靠，GEAPCK 往往能在更少样本下获得更高精度，或者在相同样本量下更好地恢复局部变化趋势。它尤其适合那些模型本身就能提供解析梯度、伴随梯度或比较便宜的数值梯度的问题。然而 GEAPCK 的代价也最明显：训练慢、内存压力大、可用核函数受限，并且降维方法必须支持梯度映射。因此，它更像一个“高精度、较昂贵”的模式，而不是默认首选模式。
 
-- `FDOpts.type`: `'forward'` | `'central'`
-- `FDOpts.step`: relative perturbation size
+## 六、aPC 构造方法和回归方法应该怎么选
 
-Used when `GradientMode` is `'finite-difference'` or `'auto'` without provided gradients.
+在 `aPC_Method` 上，当前框架支持 `'2012'`、`'2018'` 和 `'stieltjes'`。如果你只是使用者而不是专门比较不同一维基构造方法的研究者，那么大多数情况下推荐直接使用 `stieltjes`。这是当前示例和对比脚本里默认使用的方法，也是在现有代码路径中最稳定的一种。除非你明确在做方法学对比，否则不必频繁切换这项。
 
-## Hyperparameter Auto-Search
+在 `RegressionMethod` 上，`lars` 是目前最常用也最推荐的选择。原因并不仅仅是它能做稀疏回归，更重要的是它天然给出了一条活跃项进入顺序，而这条顺序正好可以被 APCK/GEAPCK 用作趋势项搜索路径。也就是说，当你在 PCK 模型里设置 `max_trend_terms` 时，本质上是在这条 LARS 路径上选择不同的前缀长度。`ols` 虽然直观，但容易过密；`lasso`、`ridge`、`omp` 则分别对应不同稀疏或正则化思路。若没有特别理由，建议始终从 `lars` 开始。
 
-`aPC_Train` accepts scalar-or-vector values for searchable fields and builds a Cartesian grid.
+## 七、降维手册：为什么降维很重要，怎么理解不同方法
 
-Search-enabled fields include:
+在低维问题上，你完全可以不做降维。但一旦问题维度上来，尤其是当你同时使用 APCK/GEAPCK、较高阶多项式或者梯度增强时，计算量会迅速膨胀。降维的作用不是为了“看起来高级”，而是为了在保留主要结构的前提下，把模型拟合放到一个更低维、更稳定、更可控的空间里完成。当前框架支持的降维方法包括 `pls`、`pca`、`kpca`、`spca_hsic`、`skpca_hsic`、`mcp`、`ica` 和 `rp`。它们不是同一种东西的不同写法，而是各自代表不同建模假设。
 
-- `Order`
-- `qnorm`
-- `red_dim`
-- `kernel_type`, `kernel_gamma`, `kernel_degree`, `kernel_offset`
-- `label_kernel_type`, `label_kernel_gamma`, `label_kernel_degree`, `label_kernel_offset`
-- `KrigingOpts.corr`, `KrigingOpts.nugget`
+PCA 是最经典的线性降维方法，完全由输入协方差结构决定。PLS 在此基础上进一步利用了输出信息，因此通常比 PCA 更适合代理建模任务，也通常是高维 surrogate 场景下最推荐的选择。KPCA 和 SKPCA-HSIC 引入核技巧，适用于非线性结构明显的任务；SPCA-HSIC 强调监督性；MCP 与 ICA 更偏向研究型使用；随机投影则适合快速压缩维度、做便宜的高维 baseline。
 
-Best model is selected by minimal LOO criterion.
+需要特别注意的是，不是所有降维方法都能与 GEAPCK 搭配使用。原因并不在于“代码没写”，而在于 GEAPCK 需要把响应梯度从原始输入空间一路通过标准化和降维映射传播到模型空间，这要求降维方法在当前实现中能够提供显式线性映射。当前支持 GE 梯度传递的包括 `pls`、`pca`、`spca_hsic`、`rp`、`mcp` 和 `ica`。不支持的主要是 `kpca` 和 `skpca_hsic` 这类没有简单线性映射可供梯度链式传递的非线性核方法。因此，如果你的目标是“降维 + GEAPCK”，优先选择 `pls`、`pca` 或 `spca_hsic` 会更稳妥。
 
-## Data Requirements
+## 八、梯度手册：提供梯度、差分梯度与自动模式
 
-Minimal training data structure:
+GEAPCK 的关键在于梯度，而梯度的来源是这套框架里最容易让人误解的地方之一。首先，如果你已经能够直接给出解析梯度，那么最推荐的方式是把它作为 `data.dYdX_train` 提供给训练器，并将 `GradientMode` 设为 `'provided'`。这里的梯度格式是严格规定的：`N x M`，每一行对应一个训练样本，每一列对应一个输入变量的一阶偏导。程序不需要二阶导，也不需要交叉偏导。它只会使用这些一阶梯度，在内部通过标准化与降维映射转成模型空间中的 `dY_model`。
 
-- `data.X_train` (`N x M`)
-- `data.Y_train` (`N x 1`)
+其次，如果解析梯度不可得，那么 `'finite-difference'` 提供了一条现实中的常用路径。此时你必须让 `data.ModelFcn` 指向原始模型函数，这样训练器才能在每个维度方向上对输入做有限差分扰动，并重复调用模型来近似梯度。要理解的是，有限差分并不是“凭空得到梯度”，而是“用更多次函数评估换来一个梯度近似”。因此在高维或昂贵模型上，差分梯度会显著增加训练时间，尤其在 GEAPCK 下更加明显。
 
-Optional but commonly used:
+`auto` 模式则是两者之间的折中。它会优先尝试使用 `data.dYdX_train`，如果找不到，再回退到有限差分。这个模式比较适合通用脚本和 benchmark 驱动，因为它不要求你每次都手动同步修改梯度来源设定。但如果你已经明确知道自己有解析梯度，建议仍然直接用 `provided`，因为这样行为最明确，速度也最好。
 
-- `data.X_val`, `data.Y_val` for external evaluation
-- `data.dYdX_train` for GEAPCK when using provided gradients
-- `data.ModelFcn` function handle for finite-difference gradient fallback
+## 九、Kriging 与 PCK：这些参数真正意味着什么
 
-## Gradient Modes and Practical Use
+APCK 和 GEAPCK 的本质都建立在 PCK 后端之上，而 PCK 后端里最重要的一组参数是 `KrigingOpts`。这些参数中，最值得你优先理解的是 `corr`、`theta0`、`theta_lb`、`theta_ub`、`nugget`、`optimize_theta`、`max_trend_terms` 和 `DisplayProgress`。`corr` 指定相关函数类型。对于 APCK，当前支持 `gaussian`、`exponential` 和 `matern32`；对于 GEAPCK，当前支持 `gaussian` 和 `matern32`，而不支持 `exponential`。这个限制不是任意设置的，而是因为 GE 需要核函数的导数块，而 `exponential` 在零点不可微，不适合构造梯度增强协方差系统。
 
-For GEAPCK, three gradient sources are supported:
+`theta0`、`theta_lb`、`theta_ub` 决定的是长度尺度优化的起点和边界。你可以把 `theta` 理解成“核函数在各个输入维度上的相关尺度”。如果 `optimize_theta=false`，那么后端会直接用 `theta0` 当作固定长度尺度；如果 `optimize_theta=true`，那么后端会在这些边界内用 `fmincon` 在对数空间优化 `theta`。这一步是 APCK/GEAPCK 训练中最昂贵的部分之一，也是为什么 `optimal` 模式在 trend 数很多时会变慢的核心原因。
 
-- `provided`: use `data.dYdX_train`
-- `finite-difference`: compute gradients by repeated model evaluations
-- `auto`: use provided if present, otherwise finite difference
+`max_trend_terms` 控制沿 LARS 路径要评估多少个 trend 候选。如果你把它写成 `[0.1, 0.8]`，意思是沿路径从前 10% 到前 80% 的区间中逐个尝试 trend 大小，而不是“只尝试两个值”。这使得 PCK 后端天然带有一个内层模型选择过程。区间越宽，候选越多，训练越慢，但也可能更有机会找到更好的模型。若你只是做快速试验，可以适当收窄区间；若你在认真做精度比较，则可以保留较宽范围。
 
-This is exposed in `main_compare.m` via benchmark controls.
+## 十、并行手册：现在并行到底是怎么分层工作的
 
-## Dimension Reduction + GEAPCK Gradient Propagation
+很多使用者第一次看到 `ModelOpts.Parallel` 时，会自然地认为这是一个简单的“开关”：开了就全部并行，不开就全部串行。实际上在这套框架里，并行是有层级的，而且不同模型适合的并行层级不同。对纯 APC 而言，最自然的并行方式是外层搜索网格并行，也就是同时评估多个不同超参数组合。因为 APC 本身的单个 candidate 拟合相对便宜，真正值得并行化的是外层候选数量。
 
-GEAPCK requires chain-rule propagation through standardization and reduction transforms.
+但到了 APCK 和 GEAPCK，问题就变了。如果 `PCKType='sequential'`，那么每个 trend 的拟合会把前一个 trend 优化得到的 `theta` 传给下一个 trend 作为初值，这条路径本质上具有顺序依赖关系，因此不适合把内层 trend 评估并行化。此时即便开启并行，也主要是外层搜索网格并行。
 
-Currently supported for GE gradient propagation with explicit linear map:
+如果 `PCKType='optimal'`，情况就不同了。此时每个 trend 候选可以视为相对独立的子问题，尤其在搜索网格只有一个配置时，把并行资源用在 trend 路径上会更合理。因此当前实现会自动在 `optimal + 单配置 + Parallel=1` 时进入 `Trend-Parallel`。这时你会看到 `aPC_Train` 输出配置级进度，同时 `aPC_PCKBackend` 输出 trend 级进度。若 `Parallel=0`，则同样的 trend 路径仍然会显示进度，但标签会变成 `Trend-Serial`。目前这两种模式已经统一成相同样式，只在标签上区分串行与并行。
 
-- `pls`, `pca`, `rp`, `mcp`, `ica`
+这里必须补充一个非常重要但容易误解的现实：在 `optimal + optimize_theta=true` 的设置下，串行和并行可能出现很小的数值差异。这并不是因为你“没按最小 LOO 选”，而是因为每个 trend 的 `theta` 都需要做连续数值优化，而并行时这些优化在不同 worker 上进行，最终的优化路径可能略有差异。当前实测表明，这类差异往往表现为：串行和并行选中的 trend 集合相同，但 `theta` 有细微不同，进而导致 `LOO` 和 `RelMSE` 也有细小偏差。如果差异很小，这属于正常数值现象，而不是框架逻辑错误。若你要求严格的一致性，最直接的办法是固定 `theta` 或关闭 `optimize_theta`。
 
-Nonlinear kernel reductions (`kpca`, `skpca_hsic`) are not currently supported for GE gradient propagation.
+## 十一、训练日志与报告：如何理解程序的输出
 
-## Benchmark Utilities
+这套框架当前有两类输出。第一类是训练日志，它强调的是“过程”，主要来自 `aPC_Train` 和 `aPC_PCKBackend`。你会看到训练开始、训练结束、当前并行模式、配置级进度条，以及在 APCK/GEAPCK 的 `optimal` 模式下出现的 trend 级进度。第二类是结果报告，它强调的是“结果”，主要由 `aPC_print`、`aPC_printUQ` 和 `aPC_printSensitivity` 负责。
 
-`main_compare.m` supports side-by-side comparison of:
+`aPC_print` 现在已经整理成主报告形式。默认情况下，它只显示最核心的信息，也就是模型摘要、数据摘要、误差摘要，以及在有降维时自动增加的降维摘要。这种做法的目的是避免把用户最常见的结果阅读过程，淹没在一大段系数表和正交性诊断里。若你需要更细节的诊断，可以显式传入 `"orthogonality"` 或 `"coefficients"`，或者直接使用 `"all"`。
 
-- UQLab PCE
-- APC
-- APCK
-- GEAPCK
+`aPC_printUQ` 和 `aPC_printSensitivity` 也已统一成同样的报告风格。前者分为 `Core Statistics` 和 `Extended Statistics`，分别承载均值、方差、标准差，以及置信区间、偏度、峰度、VaR、CVaR 等扩展统计量。后者则分为总效应、一阶和二阶 Sobol 指数三个部分。需要注意的是，这两个模块目前只支持 `ModelType='apc'`，也就是说如果你训练的是 APCK 或 GEAPCK，当前实现并不直接在这些模型上做 UQ 与灵敏度分析。
 
-Benchmark gradient helpers are under:
+## 十二、benchmark 与示例脚本：如何做对比实验
 
-- `benchmark/gradients/ishigami_grad.m` (analytic)
-- `benchmark/gradients/wingweight_grad.m` (analytic)
-- `benchmark/gradients/morris10_grad.m` (analytic)
+`main_compare.m` 是这个仓库里非常值得重视的脚本。它不只是一个示例，而是一个很适合长期演化的 benchmark 驱动程序。这个脚本会先设定随机种子，然后选择 benchmark 问题，例如 `ishigami`、`wingweight` 或 `morris10`，接着统一生成训练集与验证集，再对 `uqlab_pce`、`apc`、`apck`、`geapck` 依次运行并汇总结果。由于所有模型都共用同一批数据，所以它特别适合做方法对比和回归检查。
 
-## UQ and Sensitivity
+如果你要做公平比较，最重要的是不要让每个模型各自重新采样。`main_compare.m` 当前已经固定了 `rng(80)`，并且在脚本开头只生成一次训练和验证数据，这一点是正确的。如果你只是想比较串行与并行差异，也建议在这份脚本的基础上，只切换 `ModelOpts.Parallel` 而不要改其他内容。如果你进一步怀疑串并行结果是否一致，可以把 `results.PCKModel.theta`、`trend_idx` 和 `LOO` 打印出来做更细致对照。
 
-- UQ: `aPC_ComputeUQ`
-  - mean, variance, std, CI95, skewness, kurtosis, VaR95, CVaR95
-- Sensitivity: `aPC_ComputeSensitivity`
-  - first-order, second-order, total Sobol indices
+## 十三、UQ 与灵敏度分析：当前能力边界是什么
 
-At present these two modules are restricted to `ModelType='apc'`.
+这套框架当前已经实现了 `aPC_ComputeUQ` 和 `aPC_ComputeSensitivity`。前者可以根据 APC 模型系数给出均值、方差、标准差、95% 区间、偏度、峰度、VaR95 和 CVaR95 等统计量；后者则可以给出一阶、二阶和总 Sobol 指数。这两个模块都以纯 APC 为基础，因此在数值上和理论上都较为直接。
 
-## Directory Structure
+但需要明确的一点是，当前实现没有直接把 APCK 和 GEAPCK 也接入这两个模块。也就是说，如果你希望做严格的 UQ 或 Sobol 分析，最稳妥的路径仍然是 APC。APCK 和 GEAPCK 当前主要服务于高精度代理拟合与预测，而不是直接服务于现有的统计与灵敏度后处理模块。这不是说它们理论上不能扩展到那一步，而是当前代码尚未把这部分工作做完。
 
-```text
-aPC
-├── apc_train
-├── auto_search
-├── basis
-├── benchmark
-│   ├── gradients
-│   └── inputopts
-├── coefficients
-├── core
-├── dimreduct
-├── display
-├── predict
-├── sensitivity
-├── tests
-├── UQ
-├── utils
-├── main.m
-├── main_compare.m
-└── README.md
-```
+## 十四、常见问题与经验建议
 
-## Typical Usage Snippet
+很多人第一次跑 GEAPCK 时会直观地感到“为什么这么慢”。原因并不神秘。GEAPCK 不只是比 APCK 多用了梯度这么简单，它还会把函数值与梯度一起拼成增广协方差系统，矩阵规模会明显扩大。如果同时再做长度尺度优化、trend 搜索和差分梯度估计，训练时间自然会迅速上升。因此，若你只是想先检验框架能否跑通，建议先用 APC 或 APCK 做基线，再逐步升级到 GEAPCK。
 
-```matlab
-ModelOpts = struct();
-ModelOpts.Order = [3 4 5];
-ModelOpts.qnorm = [0.7 1.0];
-ModelOpts.aPC_Method = 'stieltjes';
-ModelOpts.RegressionMethod = 'lars';
-ModelOpts.ModelType = 'geapck';
-ModelOpts.PCKType = 'optimal';
-ModelOpts.GradientMode = 'auto';
-ModelOpts.FDOpts.type = 'central';
-ModelOpts.FDOpts.step = 1e-6;
+另一个非常常见的问题是“为什么串行和并行会有一点不一样”。这个问题在 APC 上通常不存在，但在 `optimal + optimize_theta=true` 的 APCK/GEAPCK 路径上是可能出现的。当前调查结果显示，这类差异主要来自 `theta` 数值优化本身，而不是模型选择流程写错。若差异非常小，属于正常数值现象；若差异大到改变了趋势项结构或误差量级，则应该进一步排查。
 
-ModelOpts.ReductionMethod = 'pls';
-ModelOpts.red_dim = [4 6 8];
+关于梯度，最容易出错的地方是数据格式。框架需要的是 `N x M` 的一阶梯度矩阵，而不是单列导数，也不是 Hessian。如果你开启了 GEAPCK 却没有给解析梯度，那么请确保 `data.ModelFcn` 存在，并且 `GradientMode` 允许差分回退。对于降维，如果你的目标是 GEAPCK，请优先选择支持显式线性映射的方法，例如 `pls`、`pca` 或 `spca_hsic`。如果你选的是 `kpca` 或 `skpca_hsic` 之类的非线性核降维，那么目前不适合做 GE 梯度传递。
 
-ModelOpts.KrigingOpts.corr = 'gaussian';
-ModelOpts.KrigingOpts.nugget = [1e-8 1e-6];
-ModelOpts.KrigingOpts.theta0 = 1.0;
-ModelOpts.KrigingOpts.theta_lb = 1e-3;
-ModelOpts.KrigingOpts.theta_ub = 1e2;
-ModelOpts.KrigingOpts.max_trend_terms = [0.1, 0.8];
-ModelOpts.KrigingOpts.optimize_theta = true;
+最后，关于文档使用方式也给一个建议：当你只是想“跑”，优先看 `main.m` 和 `main_compare.m`；当你想理解流程，回来看本手册的训练、模型与并行章节；当你要扩展算法，优先读 `apc_train`、`coefficients/aPC_PCKBackend.m`、`coefficients/pck/` 与 `utils/aPC_PrepareModelGradients.m`。这套框架已经不是一个很小的脚本，而是一套逐渐成型的建模平台，因此最好的学习方式不是死盯一个函数，而是先理解整体流程，再逐层深入。
 
-[results, ModelOptsOut, dataOut, ReduceModel] = aPC_Train(data, ModelOpts);
-y_pred = aPC_Predict(X_new, results, ModelOptsOut, ReduceModel);
-```
+## 十五、项目目录该怎样读
+
+如果你把仓库当作一套系统来理解，那么目录结构就不只是“文件放在哪”这么简单。`core/` 负责整个工程的路径初始化；`basis/` 负责多项式基与设计矩阵；`apc_train/` 是训练阶段的主入口与候选评估逻辑；`coefficients/` 里既包含纯回归，也包含 PCK 与 GEAPCK 的主要后端实现；`dimreduct/` 汇总了所有降维方法；`predict/` 负责预测阶段；`UQ/` 与 `sensitivity/` 分别对应不确定性统计和 Sobol 分析；`benchmark/` 放 benchmark 函数、输入选项与梯度函数；`utils/` 负责打印、差分梯度、梯度准备等辅助功能。把这些目录按职责理解之后，再读代码就会容易得多。
+
+从长期维护角度看，这套框架已经具备继续扩展的基础。你可以在 APC、APCK、GEAPCK 之间加新模型，也可以给降维模块补新方法，还可以继续扩展更多核函数、输出更多统计报告、增加新的 benchmark。只要始终把握住几个基本原则——统一的数据形状、清晰的 `ModelOpts` 配置、训练与预测的一致映射、以及以 LOO 为核心的模型选择准则——这套框架就会继续保持清晰和可维护。
+
+如果你只是想开始使用，那么现在最实用的建议仍然是：先运行 `main.m` 熟悉单次流程，再运行 `main_compare.m` 理解对比流程；先用 APC 做基线，再上 APCK；只有在梯度信息可靠且你确实需要更高精度时，再转向 GEAPCK。等你对这些流程熟悉之后，这份手册里的每一章都会逐渐从“说明”变成“索引”，那时你就真正掌握这套框架了。
+
+## 十六、配置字段详解：每个设置项到底能填什么、意味着什么
+
+前面的章节已经解释了整个框架的逻辑，但在真正使用时，大家最常回头查的仍然是 `ModelOpts` 里每一个字段到底怎么写、可选值是什么、改动它会影响什么。这里不再用一行一行的字典式列表来写，而是按照功能分组，把这些字段放回实际建模语境中讲清楚。
+
+首先是最核心的一组多项式与回归设置，也就是 `Order`、`qnorm`、`aPC_Method` 和 `RegressionMethod`。`Order` 表示多项式的总阶数，它既可以是一个标量，也可以是一个向量。如果你写成标量，例如 `Order = 6`，表示模型只尝试 6 阶；如果写成向量，例如 `Order = [4 5 6]`，则训练会把它作为搜索维度之一。`qnorm` 也是一样的，它可以是一个标量，也可以是搜索向量。它控制的是多指标截断的稀疏程度：当 `qnorm = 1` 时，最接近传统总阶截断；当 `qnorm < 1` 时，组合项会更稀疏，从而减少高阶交互项数量。通常在维度较高时，较小的 `qnorm` 更有帮助。
+
+`aPC_Method` 当前支持 `'2012'`、`'2018'` 和 `'stieltjes'`。如果你只是正常使用，不刻意做算法对比，建议始终优先用 `'stieltjes'`。它在现有代码路径中最稳定，也和当前示例保持一致。`RegressionMethod` 支持 `'ols'`、`'lars'`、`'lasso'`、`'ridge'` 和 `'omp'`。这几个名字的含义与统计学习中的常规定义一致，但在本框架里，`lars` 的地位最特殊，因为它不仅能做稀疏回归，还能给出一条趋势项进入顺序，这条顺序会被 APCK 和 GEAPCK 用作 trend 搜索路径。因此，如果你不确定该怎么选，优先使用 `lars`。在纯 APC 中它是不错的默认值，在 APCK/GEAPCK 中则几乎是最自然的选择。
+
+第二组是模型族相关设置，即 `ModelType`、`PCKType` 和 `GradientMode`。`ModelType` 决定你训练的是哪一类模型，可选值是 `'apc'`、`'apck'` 和 `'geapck'`。这三个值分别对应纯多项式混沌、PCE 加 Kriging 残差、以及带梯度增强的 APCK。若你选择的是 `'apc'`，那么 `PCKType` 没有意义；若选择的是 `'apck'` 或 `'geapck'`，则必须再给 `PCKType`。`PCKType` 当前支持 `'sequential'` 和 `'optimal'`。所谓 `sequential`，是沿 LARS 趋势路径顺序扩展，每一步都继承上一步的 `theta` 作为初值；所谓 `optimal`，是把每个 trend 候选作为相对独立的模型进行评估，再根据最小 LOO 选最优者。前者更便宜，也更稳定；后者更自由，通常潜在精度更高，但训练代价更大。
+
+如果模型类型是 `geapck`，还会涉及 `GradientMode`。这个字段支持 `'provided'`、`'finite-difference'` 和 `'auto'`。`'provided'` 意味着你已经把训练点处的梯度矩阵放在 `data.dYdX_train` 里；`'finite-difference'` 意味着框架会调用 `data.ModelFcn` 做差分估计；`'auto'` 则表示若检测到你已经提供了 `dYdX_train` 就直接使用，否则自动回退到有限差分。在项目的实际使用中，如果有解析梯度，建议明确写 `provided`；如果没有解析梯度且模型函数可批量评估，可以用 `finite-difference`；如果你想写一个既能接解析梯度、也能自动回退差分的通用脚本，则用 `auto`。
+
+第三组是并行相关字段。用户真正显式设置的核心开关其实只有 `Parallel`。它通常写成 `0` 或 `1`，也可以理解为 `false` 或 `true`。它的含义不是“训练中所有地方都并行”，而是“允许框架自动选择合适的并行层级”。对 APC 来说，并行往往落在外层搜索网格；对 `sequential` 的 APCK/GEAPCK 来说，也主要是外层搜索并行；对 `optimal` 的 APCK/GEAPCK，如果搜索网格只有一个配置，那么并行可能下沉到 trend 路径内部。也正因为如此，`Parallel=1` 后你看到的打印标签可能是 `Parallel`，也可能是 `Trend-Parallel`，这取决于训练器最终判定的并行层级。你一般不需要直接手动管理内部的 `ParallelScope`，那是训练器自己决定的内部状态。
+
+第四组是降维相关字段。最核心的是 `ReductionMethod` 和 `red_dim`。`ReductionMethod` 当前支持 `'pls'`、`'pca'`、`'kpca'`、`'spca_hsic'`、`'skpca_hsic'`、`'mcp'`、`'ica'` 和 `'rp'`。如果不写这项，表示不做降维。`red_dim` 是目标降维后的维度，通常是标量，也可以作为搜索向量。例如 `red_dim = [2 4 6]` 表示训练器会在这几个候选维度间比较。对于某些核方法，如 `kpca` 和 `skpca_hsic`，`red_dim` 还可能支持 `(0,1)` 区间内的比例式写法，用来表示保留一定比例的主成分能量，但最常见和最稳妥的用法仍然是直接写成整数维度。
+
+在降维方法之外，还有一组与特定降维器绑定的参数。如果你用的是 KPCA 或 SKPCA-HSIC，最常见的字段是 `kernel_type`、`kernel_gamma`、`kernel_degree` 和 `kernel_offset`。这些字段分别对应输入核的类型、核尺度、核次数与偏置项。典型情形下，`kernel_type` 可以是 `'gaussian'`，此时最重要的是 `kernel_gamma`；如果使用多项式核，则 `kernel_degree` 和 `kernel_offset` 也变得重要。对于带标签核的监督方法，如 `skpca_hsic`，还会用到 `label_kernel_type`、`label_kernel_gamma`、`label_kernel_degree` 和 `label_kernel_offset`。这些参数的语义与输入核完全类似，只不过作用对象从输入换成了输出标签。除非你明确在研究核方法，不建议一开始把这些字段全都打开搜索；更合理的做法是先固定核类型，再只在 `gamma` 上做少量搜索。
+
+如果你使用的是 `mcp`，则会接触到 `mcp_opts` 这组嵌套字段。当前常见的包括 `mcp_opts.maxIter`、`mcp_opts.whiten`、`mcp_opts.alpha_cov`、`mcp_opts.max_moment_order`、`mcp_opts.moment_base`、`mcp_opts.moment_decay`、`mcp_opts.lambda_y`、`mcp_opts.supervision_mode` 和 `mcp_opts.manopt_solver`。这些参数整体上决定了 MCP 目标函数更偏向哪类统计结构、如何加权高阶矩、是否引入监督项，以及用什么优化器求解。如果你没有明确的研究需求，MCP 往往不应该是第一选择，它更适合作为高阶结构探索或方法对比使用。
+
+如果你使用 ICA，则会接触到 `ica_approach`、`ica_fun`、`ica_a1`、`ica_a2`、`ica_epsilon`、`ica_maxIter`、`ica_mu`、`ica_stabilization`、`ica_whiten_solver`、`ica_seed` 和 `ica_verbose`。这些参数基本都遵循 ICA 领域的常规定义：使用对称法还是 deflation、非线性函数选择哪一种、收敛阈值如何设定、最大迭代次数是多少、是否稳定化、白化是用 SVD 还是特征值分解、是否固定随机种子等等。如果你的目标仅仅是“降一点维然后建模”，ICA 通常不是最优先的方法；但如果你希望研究独立成分结构，它就会很有价值。
+
+随机投影相关字段相对简单，主要是 `rp_type`、`rp_scale` 和 `rp_seed`。`rp_type` 支持 `'gaussian'` 和 `'rademacher'`，分别对应高斯随机矩阵和取值为 `±1` 的随机矩阵。`rp_scale` 则控制是否按 Johnson-Lindenstrauss 思路缩放，常见值是 `'jl'` 或 `'none'`。在需要一个便宜且快速的高维 baseline 时，随机投影往往很有帮助。
+
+第五组是 APCK/GEAPCK 的 Kriging 相关参数，也就是 `KrigingOpts`。这部分是很多人最关心、也最容易调得过多的地方。最核心的字段是 `KrigingOpts.corr`、`KrigingOpts.theta0`、`KrigingOpts.theta_lb`、`KrigingOpts.theta_ub`、`KrigingOpts.nugget`、`KrigingOpts.optimize_theta`、`KrigingOpts.max_trend_terms` 和 `KrigingOpts.DisplayProgress`。`corr` 支持 `'gaussian'`、`'exponential'` 和 `'matern32'`，但需要记住这只是 APCK 的全集；GEAPCK 当前只支持 `'gaussian'` 和 `'matern32'`，不支持 `'exponential'`。`theta0` 是长度尺度初值，若写成标量会自动扩展到每个输入维度；`theta_lb` 和 `theta_ub` 是长度尺度的下界与上界，同样支持标量自动扩展。`nugget` 是数值稳定项，用来改善协方差矩阵条件数。通常如果矩阵病态或训练点接近重复，适当增大 `nugget` 会更稳。
+
+`optimize_theta` 决定长度尺度是否真的去优化。如果它是 `false`，后端会直接用 `theta0`；如果它是 `true`，就会在边界约束下用数值优化器搜索更优的 `theta`。这项设置对速度和精度影响都非常大，是 APCK/GEAPCK 中最值得你认真理解的开关之一。`max_trend_terms` 则控制沿 LARS 趋势路径评估多少个 trend 候选。它可以写成单个数，也可以写成两元素区间。若值不超过 1，会被解释为“LARS 路径比例”；若值大于 1，则会被解释为“绝对项数上限”。例如 `[0.1, 0.8]` 表示从前 10% 到前 80% 的趋势项长度区间中搜索。`DisplayProgress` 则只影响内部进度打印，不改变模型结果。
+
+第六组是差分梯度相关设置，也就是 `FDOpts`。这组字段只在 GEAPCK 且梯度模式允许差分回退时才起作用。当前主要有 `FDOpts.type` 和 `FDOpts.step`。`FDOpts.type` 支持 `'forward'` 和 `'central'`。前向差分更便宜，但精度稍低；中心差分更稳，代价也更高。`FDOpts.step` 是相对扰动步长，它会影响数值梯度的稳定性和精度。如果你发现差分梯度导致结果异常波动，可以先从步长检查起。
+
+最后，还要强调一个经常被误解的问题：哪些字段支持自动搜索，哪些字段只是单次配置。像 `Order`、`qnorm`、`red_dim`、`kernel_gamma`、`kernel_degree`、`kernel_offset`、`label_kernel_gamma`、`KrigingOpts.corr`、`KrigingOpts.nugget` 等，都可以作为搜索字段写成向量；而像 `theta0`、`theta_lb`、`theta_ub` 这种更偏向优化器定义的字段，一般不建议直接做笛卡尔积搜索。当前测试中也专门保留了“`theta0` 不属于搜索字段”的检查，这正说明框架设计上并不鼓励把所有数值参数都扔进外层网格。
+
+如果你把这组字段理解成一整套“层层展开的控制系统”，而不是一份零散的参数表，就会更容易把握这套框架。最外层由 `ModelType` 决定走 APC 还是 PCK 家族；若走 PCK，再由 `PCKType` 决定趋势搜索方式；若走 GE，再由 `GradientMode` 决定梯度来源；如果还要降维，则由 `ReductionMethod` 和其附属参数决定模型空间；最后，Kriging 相关参数再控制残差模型的具体形式。理解了这个层级关系后，配置就不再是“乱七八糟的一堆字段”，而是一棵有组织的决策树。

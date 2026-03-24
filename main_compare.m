@@ -1,5 +1,5 @@
 clear; clc; close all;
-% rng(80);
+rng(80);
 
 repo_root = fileparts(mfilename('fullpath'));
 addpath(fullfile(repo_root, 'core'));
@@ -9,7 +9,7 @@ uqlab
 ModelOpts = struct();
 
 % === 基础多项式设置 ===
-ModelOpts.Order = [8];                  % 多项式总阶数 p；可设为标量或搜索向量
+ModelOpts.Order = [4];                  % 多项式总阶数 p；可设为标量或搜索向量
 ModelOpts.qnorm = [0.7];                % q-norm 截断参数；越小越稀疏
 ModelOpts.aPC_Method = 'stieltjes';     % 一维 aPC 构造方法：'2012' | '2018' | 'stieltjes'
 ModelOpts.RegressionMethod = 'lars';    % APC trend 的回归器：通常用 'lars'
@@ -76,7 +76,7 @@ ModelOpts.KrigingOpts.DisplayProgress = true;% 是否显示 sequential/optimal �
 
 % === 基准函数选择（含梯度） ===
 Benchmark.Name = 'ishigami';          % 'ishigami' | 'wingweight' | 'morris10'
-Benchmark.N_train = 300;
+Benchmark.N_train = 200;
 Benchmark.N_val = 2000;
 Benchmark.GradientSource = 'finite-difference';  % 'analytic' | 'finite-difference' | 'auto'
 Benchmark.FDType = 'central';           % 'forward' | 'central'

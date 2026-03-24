@@ -24,18 +24,14 @@ data.map_U = map_U;
 %% ---------- 构造搜索网格 ----------
 grid = aPC_build_search_grid(ModelOpts);
 total = numel(grid);
+parallel_scope = localResolveParallelScope(ModelOpts, total);
 
-if total == 1
-    ModelOpts.Parallel = false;
-end
-
-if ~ModelOpts.Parallel
+if ~strcmp(parallel_scope, 'outer')
 
     %% ---------- 初始化进度条 ----------
     cnt = 0;
     bar_len = 40;
-    fprintf('\n>>>>>>>>            aPC TRAIN BEGIN            <<<<<<<\n\n');
-    fprintf('[aPC_Train] (Serial) Starting search over %d configurations...\n', total);
+    localPrintTrainHeader(parallel_scope, total);
 
     best = struct('score', Inf);
 
@@ -52,6 +48,7 @@ if ~ModelOpts.Parallel
 
         % 当前候选参数（原始版本）
         Mo = grid(gi);
+        Mo.ParallelScope = parallel_scope;
 
         candidate = aPC_TrainCandidate(data, map_U, Mo);
         Mo_tmp = candidate.ModelOpts;
@@ -82,8 +79,9 @@ if ~ModelOpts.Parallel
         % KPCA,SKPCA 显示 kernel 参数
         extra_str = aPC_kernel_print_str(Mo_tmp);
 
-        fprintf('\r[aPC_Train] [%s] %3d%% \n| RD=%s | rd=%s | p=%d | q=%g%s | LOO=%e\n', ...
-            bar_str, round(pct*100), redm, rd_str, Mo_tmp.Order, Mo_tmp.qnorm, extra_str, score_tmp);
+        fprintf('\r%s\n', localFormatTrainProgress(bar_str, pct, cnt, total));
+        fprintf('| RD=%s | rd=%s | p=%d | q=%g%s | LOO=%e\n', ...
+            redm, rd_str, Mo_tmp.Order, Mo_tmp.qnorm, extra_str, score_tmp);
 
         % ---------- 更新最优 ----------
     if score_tmp < best.score || ~isfinite(best.score)
@@ -150,11 +148,11 @@ if ~ModelOpts.Parallel
     end
     
     % --- kernel 信息（仅 KPCA,SKPCA） ---
-    extra_str = aPC_kernel_print_str(Mo);
+    extra_str = aPC_kernel_print_str(mo);
     
     fprintf('[aPC_Train] Best Model: RD=%s | rd=%s | p=%d | q=%g%s | LOO=%e\n', ...
             redm, rd_str, mo.Order, mo.qnorm, extra_str, best.score);
-    fprintf('\n>>>>>>>>             aPC TRAIN END             <<<<<<<\n\n');
+    localPrintTrainFooter();
 
     return;  % 串行版本结束
 end
@@ -162,7 +160,7 @@ end
 %% ============================================================
 %                   并行版本（parallel = true）
 % ============================================================
-fprintf('[aPC_Train] (Parallel) Starting search over %d configurations...\n', total);
+localPrintTrainHeader('outer', total);
 
 % —— 单行进度条 ——
 dq = parallel.pool.DataQueue;
@@ -174,8 +172,7 @@ afterEach(dq, @updateBar);
         pct = cnt / total;
         filled  = round(pct * bar_len);
         bar_str = [repmat('#',1,filled), repmat('-',1,bar_len-filled)];
-        fprintf('\r[aPC_Train] [%s] %3d%%  (%d/%d)', ...
-            bar_str, round(pct*100), cnt, total);
+        fprintf('\r%s', localFormatTrainProgress(bar_str, pct, cnt, total));
     end
 
 % —— 开并行池 ——
@@ -185,7 +182,9 @@ if isempty(gcp('nocreate')), parpool; end
 outs(total) = struct('score', Inf);
 
 parfor gi = 1:total
-    outs(gi) = aPC_evaluateCandidate_score(data, grid(gi));
+    Mo = grid(gi);
+    Mo.ParallelScope = 'serial';
+    outs(gi) = aPC_evaluateCandidate_score(data, Mo);
     send(dq, gi);
 end
 
@@ -195,6 +194,7 @@ fprintf('\n');
 [~, best_idx] = min([outs.score]);
 best_score = outs(best_idx).score;
 best_choice   = grid(best_idx);
+best_choice.ParallelScope = 'serial';
 
 %% —— 串行重训 ——
 candidate = aPC_TrainCandidate(data, map_U, best_choice);
@@ -246,10 +246,11 @@ else
 end
 
 % --- kernel 信息（仅 KPCA,SKPCA） ---
-extra_str = aPC_kernel_print_str(Mo);
+extra_str = aPC_kernel_print_str(mo);
 
 fprintf('[aPC_Train] Best Model: RD=%s | rd=%s | p=%d | q=%g%s | LOO=%e\n', ...
         redm, rd_str, mo.Order, mo.qnorm, extra_str, best_score);
+localPrintTrainFooter();
 end
 
 %% 打印KPCA和SKPCA的核信息
@@ -295,4 +296,74 @@ function ModelOpts = localValidateModelOpts(ModelOpts)
             error('aPC:InvalidPCKType', 'Unsupported PCKType: %s', ModelOpts.PCKType);
         end
     end
+end
+
+function scope = localResolveParallelScope(ModelOpts, total)
+    if ~isfield(ModelOpts, 'Parallel') || ~ModelOpts.Parallel
+        scope = 'serial';
+        return;
+    end
+
+    model_type = lower(strtrim(ModelOpts.ModelType));
+    if strcmp(model_type, 'apc')
+        scope = localPickScope(total > 1, 'outer', 'serial');
+        return;
+    end
+
+    pck_type = lower(strtrim(ModelOpts.PCKType));
+    if strcmp(pck_type, 'sequential')
+        scope = localPickScope(total > 1, 'outer', 'serial');
+    else
+        scope = localPickScope(total > 1, 'outer', 'trend');
+    end
+end
+
+function out = localPickScope(cond, a, b)
+if cond
+    out = a;
+else
+    out = b;
+end
+end
+
+function label = localParallelScopeLabel(scope)
+    switch lower(scope)
+        case 'serial'
+            label = 'Serial';
+        case 'trend'
+            label = 'Trend-Parallel';
+        case 'outer'
+            label = 'Parallel';
+        otherwise
+            label = scope;
+    end
+end
+
+function localPrintTrainHeader(scope, total)
+    fprintf('\n%s\n', localTrainDivider('BEGIN'));
+    fprintf('[aPC_Train] (%s) Evaluating %d configuration(s)...\n', ...
+        localParallelScopeLabel(scope), total);
+end
+
+function localPrintTrainFooter()
+    fprintf('\n%s\n\n', localTrainDivider('END'));
+end
+
+function line = localTrainDivider(label)
+    width = localTrainLogWidth() - strlength('[aPC_Train] ');
+    core = sprintf(' aPC TRAIN %s ', upper(label));
+    pad_total = max(0, width - strlength(core));
+    left = floor(pad_total / 2);
+    right = pad_total - left;
+    line = ['[aPC_Train] ' repmat('=', 1, left) core repmat('=', 1, right)];
+end
+
+function line = localFormatTrainProgress(bar_str, pct, cnt, total)
+    width = localTrainLogWidth();
+    raw = sprintf('[aPC_Train] [%s] %3d%%  (%d/%d)', bar_str, round(pct * 100), cnt, total);
+    line = sprintf(['%-' num2str(width) 's'], raw);
+end
+
+function width = localTrainLogWidth()
+    width = 84;
 end

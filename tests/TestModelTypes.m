@@ -233,6 +233,129 @@ fields = aPC_list_search_fields();
 verifyFalse(testCase, any(strcmp(fields, 'KrigingOpts.theta0')));
 end
 
+function testParallelAPCKPrintPathDoesNotUseUndefinedMo(testCase)
+data = makeData(20, 2);
+
+ModelOpts = struct();
+ModelOpts.Order = [2, 3];
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.ModelType = 'apck';
+ModelOpts.PCKType = 'optimal';
+ModelOpts.Parallel = 1;
+ModelOpts.KrigingOpts.optimize_theta = false;
+ModelOpts.KrigingOpts.max_trend_terms = [0.2, 0.2];
+
+[results, ModelOptsOut, ~, ReduceModel] = aPC_Train(data, ModelOpts);
+Yhat = aPC_Predict(data.X_train, results, ModelOptsOut, ReduceModel);
+
+verifyEqual(testCase, lower(results.ModelType), 'apck');
+verifySize(testCase, Yhat, [size(data.X_train, 1), 1]);
+end
+
+function testOptimalAPCKSingleConfigUsesTrendParallelScope(testCase)
+data = makeData(20, 2);
+
+ModelOpts = struct();
+ModelOpts.Order = 3;
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.ModelType = 'apck';
+ModelOpts.PCKType = 'optimal';
+ModelOpts.Parallel = 1;
+ModelOpts.KrigingOpts.optimize_theta = false;
+ModelOpts.KrigingOpts.max_trend_terms = [0.2, 0.4];
+
+[results, ~, ~, ~] = aPC_Train(data, ModelOpts);
+
+verifyEqual(testCase, results.PCKModel.parallel_scope, 'trend');
+end
+
+function testTrendParallelPrintsCorrectScopeLabel(testCase)
+data = makeData(20, 2);
+
+ModelOpts = struct();
+ModelOpts.Order = 3;
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.ModelType = 'apck';
+ModelOpts.PCKType = 'optimal';
+ModelOpts.Parallel = 1;
+ModelOpts.KrigingOpts.optimize_theta = false;
+ModelOpts.KrigingOpts.max_trend_terms = [0.2, 0.4];
+
+out = evalc('[results, ~, ~, ~] = aPC_Train(data, ModelOpts);');
+
+verifyEqual(testCase, lower(results.PCKModel.parallel_scope), 'trend');
+verifyNotEmpty(testCase, strfind(out, '(Trend-Parallel)')); %#ok<STREMP>
+verifyNotEmpty(testCase, strfind(out, '[aPC_PCKBackend] [Trend-Parallel]')); %#ok<STREMP>
+verifyNotEmpty(testCase, strfind(out, 'trend 1/2')); %#ok<STREMP>
+verifyEmpty(testCase, strfind(out, '[Trend-Serial]')); %#ok<STREMP>
+end
+
+function testParallelOuterPrintsUnifiedHeaderAndFooter(testCase)
+data = makeData(20, 2);
+
+ModelOpts = struct();
+ModelOpts.Order = [2, 3];
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.ModelType = 'apck';
+ModelOpts.PCKType = 'optimal';
+ModelOpts.Parallel = 1;
+ModelOpts.KrigingOpts.optimize_theta = false;
+ModelOpts.KrigingOpts.max_trend_terms = [0.2, 0.2];
+
+out = evalc('[~, ~, ~, ~] = aPC_Train(data, ModelOpts);');
+
+verifyNotEmpty(testCase, strfind(out, 'aPC TRAIN BEGIN')); %#ok<STREMP>
+verifyNotEmpty(testCase, strfind(out, '(Parallel) Evaluating 2 configuration(s)...')); %#ok<STREMP>
+verifyNotEmpty(testCase, strfind(out, 'aPC TRAIN END')); %#ok<STREMP>
+end
+
+function testSerialProgressShowsStepCounts(testCase)
+data = makeData(20, 2);
+
+ModelOpts = struct();
+ModelOpts.Order = [2, 3];
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.ModelType = 'apc';
+ModelOpts.Parallel = 0;
+
+out = evalc('[~, ~, ~, ~] = aPC_Train(data, ModelOpts);');
+
+verifyNotEmpty(testCase, strfind(out, '(1/2)')); %#ok<STREMP>
+verifyNotEmpty(testCase, strfind(out, '(2/2)')); %#ok<STREMP>
+end
+
+function testSerialOptimalPCKShowsTrendProgress(testCase)
+data = makeData(20, 2);
+
+ModelOpts = struct();
+ModelOpts.Order = 3;
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.ModelType = 'apck';
+ModelOpts.PCKType = 'optimal';
+ModelOpts.Parallel = 0;
+ModelOpts.KrigingOpts.optimize_theta = false;
+ModelOpts.KrigingOpts.DisplayProgress = true;
+ModelOpts.KrigingOpts.max_trend_terms = [0.2, 0.4];
+
+out = evalc('[~, ~, ~, ~] = aPC_Train(data, ModelOpts);');
+
+verifyNotEmpty(testCase, strfind(out, '[aPC_PCKBackend] [Trend-Serial] trend 1/2')); %#ok<STREMP>
+verifyNotEmpty(testCase, strfind(out, '[aPC_PCKBackend] [Trend-Serial] trend 2/2')); %#ok<STREMP>
+verifyNotEmpty(testCase, strfind(out, '[###############---------------]')); %#ok<STREMP>
+end
+
 function testSensitivityBlockedForAPCK(testCase)
 data = makeData(24, 3);
 
@@ -252,6 +375,58 @@ verifyError(testCase, @() aPC_ComputeSensitivity(results, ModelOptsOut), ...
     'aPC:SensitivityOnlyForAPC');
 end
 
+function testAPCPrintDefaultReportIsStructured(testCase)
+[results, ModelOpts, data] = makePrintFixture('apck', false);
+
+out = evalc('aPC_print(results, ModelOpts, data);');
+
+verifyNotEmpty(testCase, strfind(out, 'aPC REPORT')); %#ok<STREMP>
+verifyNotEmpty(testCase, strfind(out, 'Model Summary')); %#ok<STREMP>
+verifyNotEmpty(testCase, strfind(out, 'Data Summary')); %#ok<STREMP>
+verifyNotEmpty(testCase, strfind(out, 'Error Summary')); %#ok<STREMP>
+verifyNotEmpty(testCase, strfind(out, 'PCK type')); %#ok<STREMP>
+verifyEmpty(testCase, strfind(out, 'Reduction Summary')); %#ok<STREMP>
+verifyEmpty(testCase, strfind(out, 'Orthogonality')); %#ok<STREMP>
+verifyEmpty(testCase, strfind(out, 'PCE Coefficients')); %#ok<STREMP>
+end
+
+function testAPCPrintShowsReductionSummaryConditionally(testCase)
+[results, ModelOpts, data] = makePrintFixture('geapck', true);
+
+out = evalc('aPC_print(results, ModelOpts, data);');
+
+verifyNotEmpty(testCase, strfind(out, 'Reduction Summary')); %#ok<STREMP>
+verifyNotEmpty(testCase, strfind(out, 'Dimension reduction')); %#ok<STREMP>
+verifyNotEmpty(testCase, strfind(out, 'Reduced dimension')); %#ok<STREMP>
+end
+
+function testAPCPrintUQIsStructured(testCase)
+UQ = struct('mean', 1.2, 'var', 0.3, 'std', sqrt(0.3), 'CI95', [0.1 2.3], 'VaR95', 0.2);
+out = evalc('aPC_printUQ(UQ);');
+
+verifyNotEmpty(testCase, strfind(out, 'UQ REPORT')); %#ok<STREMP>
+verifyNotEmpty(testCase, strfind(out, 'Core Statistics')); %#ok<STREMP>
+verifyNotEmpty(testCase, strfind(out, 'Extended Statistics')); %#ok<STREMP>
+end
+
+function testAPCPrintSensitivityIsStructured(testCase)
+SA = struct();
+SA.S_first = [0.2 0.3 0.1];
+SA.S_total = [0.4 0.5 0.2];
+SA.S_second = zeros(3, 3);
+SA.S_second(1, 2) = 0.05;
+SA.S_second(1, 3) = 0.02;
+SA.S_second(2, 3) = 0.01;
+ModelOpts = struct('num_vars', 3);
+
+out = evalc('aPC_printSensitivity(SA, ModelOpts);');
+
+verifyNotEmpty(testCase, strfind(out, 'SENSITIVITY REPORT')); %#ok<STREMP>
+verifyNotEmpty(testCase, strfind(out, 'Total-Order Indices')); %#ok<STREMP>
+verifyNotEmpty(testCase, strfind(out, 'First-Order Indices')); %#ok<STREMP>
+verifyNotEmpty(testCase, strfind(out, 'Second-Order Indices')); %#ok<STREMP>
+end
+
 function data = makeData(N, d)
 X = rand(N, d) * 2 - 1;
 Y = sin(X(:,1));
@@ -265,4 +440,31 @@ end
 data = struct();
 data.X_train = X;
 data.Y_train = Y;
+end
+
+function [results, ModelOpts, data] = makePrintFixture(modelType, withReduction)
+results = struct();
+results.method = 'LARS';
+results.ModelType = lower(modelType);
+results.PCKType = 'optimal';
+results.coefficients = [1; 0; 2];
+results.optErrorParams = struct('loo', 1.23e-3);
+results.RelMSE = 4.56e-4;
+results.N_train = 20;
+results.N_test = 10;
+results.Indices = [0 0; 1 0; 0 1];
+
+ModelOpts = struct();
+ModelOpts.Order = 3;
+ModelOpts.qnorm = 0.7;
+ModelOpts.num_vars = 2;
+ModelOpts.Indices = results.Indices;
+if withReduction
+    ModelOpts.ReductionMethod = 'pls';
+    ModelOpts.red_dim = 1;
+end
+
+data = struct();
+data.X_train = rand(20, 2);
+data.Y_train = rand(20, 1);
 end
