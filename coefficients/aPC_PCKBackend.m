@@ -21,6 +21,13 @@ function results = aPC_PCKBackend(Psi, data_model, ModelOpts, basis_info)
     KrigingOpts = localSetDef(KrigingOpts, 'theta_ub', 1e2);
     KrigingOpts = localSetDef(KrigingOpts, 'optimize_theta', false);
     KrigingOpts = localSetDef(KrigingOpts, 'DisplayProgress', false);
+    KrigingOpts = localSetDef(KrigingOpts, 'early_stop_patience', inf);
+
+    early_stop_patience = KrigingOpts.early_stop_patience;
+    if ~isscalar(early_stop_patience) || isnan(early_stop_patience) || early_stop_patience < 1
+        error('aPC:InvalidEarlyStopPatience', ...
+            'KrigingOpts.early_stop_patience must be a scalar >= 1 or Inf.');
+    end
 
     parallel_scope = 'serial';
     if isfield(ModelOpts, 'ParallelScope') && ~isempty(ModelOpts.ParallelScope)
@@ -100,6 +107,7 @@ function results = aPC_PCKBackend(Psi, data_model, ModelOpts, basis_info)
         [~, best_idx] = min(loo_vals);
         best = models{best_idx};
     else
+        no_improve_count = 0;
         for i = 1:numel(trend_sizes)
             theta_init = [];
             model_i = localEvaluateTrend(trend_sizes(i), i, numel(trend_sizes), 'serial', lars_order, Psi_sub, U_sub, Y_sub, G_sub, ...
@@ -107,6 +115,12 @@ function results = aPC_PCKBackend(Psi, data_model, ModelOpts, basis_info)
 
             if model_i.loo < best.loo
                 best = model_i;
+                no_improve_count = 0;
+            else
+                no_improve_count = no_improve_count + 1;
+                if strcmp(pck_type, 'optimal') && no_improve_count >= early_stop_patience
+                    break;
+                end
             end
         end
     end
@@ -302,15 +316,15 @@ function S = localSetDef(S, field, val)
 end
 
 function [k_start, k_end] = localResolveTrendRange(KrigingOpts, total_terms)
-    if ~isfield(KrigingOpts, 'max_trend_terms') || isempty(KrigingOpts.max_trend_terms)
+    if ~isfield(KrigingOpts, 'trend_range') || isempty(KrigingOpts.trend_range)
         k_start = 1;
         k_end = total_terms;
         return;
     end
 
-    cfg = KrigingOpts.max_trend_terms;
+    cfg = KrigingOpts.trend_range;
     if ~isnumeric(cfg) || any(~isfinite(cfg(:)))
-        error('aPC:InvalidMaxTrendTerms', 'KrigingOpts.max_trend_terms must be numeric and finite.');
+        error('aPC:InvalidTrendRange', 'KrigingOpts.trend_range must be numeric and finite.');
     end
 
     if isscalar(cfg)
@@ -327,12 +341,12 @@ function [k_start, k_end] = localResolveTrendRange(KrigingOpts, total_terms)
         return;
     end
 
-    error('aPC:InvalidMaxTrendTerms', 'KrigingOpts.max_trend_terms must be scalar or 2-element vector.');
+    error('aPC:InvalidTrendRange', 'KrigingOpts.trend_range must be scalar or 2-element vector.');
 end
 
 function k = localResolveOneBound(v, total_terms)
     if v <= 0
-        error('aPC:InvalidMaxTrendTerms', 'KrigingOpts.max_trend_terms values must be positive.');
+        error('aPC:InvalidTrendRange', 'KrigingOpts.trend_range values must be positive.');
     end
     if v <= 1
         k = max(1, ceil(v * total_terms));
