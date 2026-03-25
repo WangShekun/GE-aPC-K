@@ -9,7 +9,7 @@ uqlab
 ModelOpts = struct();
 
 % === 基础多项式设置 ===
-ModelOpts.Order = [4];                  % 多项式总阶数 p；可设为标量或搜索向量
+ModelOpts.Order = [5];                  % 多项式总阶数 p；可设为标量或搜索向量
 ModelOpts.qnorm = [0.7];                % q-norm 截断参数；越小越稀疏
 ModelOpts.aPC_Method = 'stieltjes';     % 一维 aPC 构造方法：'2012' | '2018' | 'stieltjes'
 ModelOpts.RegressionMethod = 'lars';    % APC trend 的回归器：通常用 'lars'
