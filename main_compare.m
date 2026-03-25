@@ -66,7 +66,8 @@ ModelOpts.KrigingOpts.theta0 = 1.0;           % 长度尺度初值；标量时�
 ModelOpts.KrigingOpts.theta_lb = 1e-3;        % 长度尺度下界
 ModelOpts.KrigingOpts.theta_ub = 1e2;         % 长度尺度上界
 ModelOpts.KrigingOpts.nugget = 1e-8;          % nugget 正则项，改善数值稳定性
-ModelOpts.KrigingOpts.max_trend_terms = [0.1, 0.8]; % trend 路径比例区间
+ModelOpts.KrigingOpts.trend_range = [0.1, 0.8]; % trend 路径比例区间
+% ModelOpts.KrigingOpts.early_stop_patience = 3;
 ModelOpts.KrigingOpts.optimize_theta = true;  % 是否优化 Kriging 长度尺度
 ModelOpts.KrigingOpts.DisplayProgress = true;% 是否显示 sequential/optimal 的内部进度
 
@@ -76,7 +77,7 @@ ModelOpts.KrigingOpts.DisplayProgress = true;% 是否显示 sequential/optimal �
 
 % === 基准函数选择（含梯度） ===
 Benchmark.Name = 'ishigami';          % 'ishigami' | 'wingweight' | 'morris10'
-Benchmark.N_train = 200;
+Benchmark.N_train = 100;
 Benchmark.N_val = 2000;
 Benchmark.GradientSource = 'finite-difference';  % 'analytic' | 'finite-difference' | 'auto'
 Benchmark.FDType = 'central';           % 'forward' | 'central'

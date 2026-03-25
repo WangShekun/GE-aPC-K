@@ -58,7 +58,7 @@ GEAPCK 则适合在你不仅关心函数值拟合，还希望把局部导数信�
 
 在 `aPC_Method` 上，当前框架支持 `'2012'`、`'2018'` 和 `'stieltjes'`。如果你只是使用者而不是专门比较不同一维基构造方法的研究者，那么大多数情况下推荐直接使用 `stieltjes`。这是当前示例和对比脚本里默认使用的方法，也是在现有代码路径中最稳定的一种。除非你明确在做方法学对比，否则不必频繁切换这项。
 
-在 `RegressionMethod` 上，`lars` 是目前最常用也最推荐的选择。原因并不仅仅是它能做稀疏回归，更重要的是它天然给出了一条活跃项进入顺序，而这条顺序正好可以被 APCK/GEAPCK 用作趋势项搜索路径。也就是说，当你在 PCK 模型里设置 `max_trend_terms` 时，本质上是在这条 LARS 路径上选择不同的前缀长度。`ols` 虽然直观，但容易过密；`lasso`、`ridge`、`omp` 则分别对应不同稀疏或正则化思路。若没有特别理由，建议始终从 `lars` 开始。
+在 `RegressionMethod` 上，`lars` 是目前最常用也最推荐的选择。原因并不仅仅是它能做稀疏回归，更重要的是它天然给出了一条活跃项进入顺序，而这条顺序正好可以被 APCK/GEAPCK 用作趋势项搜索路径。也就是说，当你在 PCK 模型里设置 `trend_range` 时，本质上是在这条 LARS 路径上选择不同的前缀长度。`ols` 虽然直观，但容易过密；`lasso`、`ridge`、`omp` 则分别对应不同稀疏或正则化思路。若没有特别理由，建议始终从 `lars` 开始。
 
 ## 七、降维手册：为什么降维很重要，怎么理解不同方法
 
@@ -78,17 +78,17 @@ GEAPCK 的关键在于梯度，而梯度的来源是这套框架里最容易让�
 
 ## 九、Kriging 与 PCK：这些参数真正意味着什么
 
-APCK 和 GEAPCK 的本质都建立在 PCK 后端之上，而 PCK 后端里最重要的一组参数是 `KrigingOpts`。这些参数中，最值得你优先理解的是 `corr`、`theta0`、`theta_lb`、`theta_ub`、`nugget`、`optimize_theta`、`max_trend_terms` 和 `DisplayProgress`。`corr` 指定相关函数类型。对于 APCK，当前支持 `gaussian`、`exponential` 和 `matern32`；对于 GEAPCK，当前支持 `gaussian` 和 `matern32`，而不支持 `exponential`。这个限制不是任意设置的，而是因为 GE 需要核函数的导数块，而 `exponential` 在零点不可微，不适合构造梯度增强协方差系统。
+APCK 和 GEAPCK 的本质都建立在 PCK 后端之上，而 PCK 后端里最重要的一组参数是 `KrigingOpts`。这些参数中，最值得你优先理解的是 `corr`、`theta0`、`theta_lb`、`theta_ub`、`nugget`、`optimize_theta`、`trend_range`、`DisplayProgress` 和 `early_stop_patience`。`corr` 指定相关函数类型。对于 APCK，当前支持 `gaussian`、`exponential` 和 `matern32`；对于 GEAPCK，当前支持 `gaussian` 和 `matern32`，而不支持 `exponential`。这个限制不是任意设置的，而是因为 GE 需要核函数的导数块，而 `exponential` 在零点不可微，不适合构造梯度增强协方差系统。
 
 `theta0`、`theta_lb`、`theta_ub` 决定的是长度尺度优化的起点和边界。你可以把 `theta` 理解成“核函数在各个输入维度上的相关尺度”。如果 `optimize_theta=false`，那么后端会直接用 `theta0` 当作固定长度尺度；如果 `optimize_theta=true`，那么后端会在这些边界内用 `fmincon` 在对数空间优化 `theta`。这一步是 APCK/GEAPCK 训练中最昂贵的部分之一，也是为什么 `optimal` 模式在 trend 数很多时会变慢的核心原因。
 
-`max_trend_terms` 控制沿 LARS 路径要评估多少个 trend 候选。如果你把它写成 `[0.1, 0.8]`，意思是沿路径从前 10% 到前 80% 的区间中逐个尝试 trend 大小，而不是“只尝试两个值”。这使得 PCK 后端天然带有一个内层模型选择过程。区间越宽，候选越多，训练越慢，但也可能更有机会找到更好的模型。若你只是做快速试验，可以适当收窄区间；若你在认真做精度比较，则可以保留较宽范围。
+`trend_range` 控制沿 LARS 路径要评估多少个 trend 候选。如果你把它写成 `[0.1, 0.8]`，意思是沿路径从前 10% 到前 80% 的区间中逐个尝试 trend 大小，而不是“只尝试两个值”。这使得 PCK 后端天然带有一个内层模型选择过程。区间越宽，候选越多，训练越慢，但也可能更有机会找到更好的模型。若你只是做快速试验，可以适当收窄区间；若你在认真做精度比较，则可以保留较宽范围。若你使用串行 `optimal` 路径，还可以通过 `early_stop_patience` 启用“连续若干次没有把当前最优 LOO 继续降下去就提前停止”的规则，以减少后段 trend 候选的无效评估。
 
 ## 十、并行手册：现在并行到底是怎么分层工作的
 
 很多使用者第一次看到 `ModelOpts.Parallel` 时，会自然地认为这是一个简单的“开关”：开了就全部并行，不开就全部串行。实际上在这套框架里，并行是有层级的，而且不同模型适合的并行层级不同。对纯 APC 而言，最自然的并行方式是外层搜索网格并行，也就是同时评估多个不同超参数组合。因为 APC 本身的单个 candidate 拟合相对便宜，真正值得并行化的是外层候选数量。
 
-但到了 APCK 和 GEAPCK，问题就变了。如果 `PCKType='sequential'`，那么每个 trend 的拟合会把前一个 trend 优化得到的 `theta` 传给下一个 trend 作为初值，这条路径本质上具有顺序依赖关系，因此不适合把内层 trend 评估并行化。此时即便开启并行，也主要是外层搜索网格并行。
+但到了 APCK 和 GEAPCK，问题就变了。如果 `PCKType='sequential'`，当前实现不再沿 LARS 路径逐步扩展并传递 `theta`，而是直接使用最终 LARS 支撑集做一次拟合。因此它本身已经没有内层 trend 搜索，开启并行时主要仍然是外层搜索网格并行。
 
 如果 `PCKType='optimal'`，情况就不同了。此时每个 trend 候选可以视为相对独立的子问题，尤其在搜索网格只有一个配置时，把并行资源用在 trend 路径上会更合理。因此当前实现会自动在 `optimal + 单配置 + Parallel=1` 时进入 `Trend-Parallel`。这时你会看到 `aPC_Train` 输出配置级进度，同时 `aPC_PCKBackend` 输出 trend 级进度。若 `Parallel=0`，则同样的 trend 路径仍然会显示进度，但标签会变成 `Trend-Serial`。目前这两种模式已经统一成相同样式，只在标签上区分串行与并行。
 
@@ -140,7 +140,7 @@ APCK 和 GEAPCK 的本质都建立在 PCK 后端之上，而 PCK 后端里最重
 
 `aPC_Method` 当前支持 `'2012'`、`'2018'` 和 `'stieltjes'`。如果你只是正常使用，不刻意做算法对比，建议始终优先用 `'stieltjes'`。它在现有代码路径中最稳定，也和当前示例保持一致。`RegressionMethod` 支持 `'ols'`、`'lars'`、`'lasso'`、`'ridge'` 和 `'omp'`。这几个名字的含义与统计学习中的常规定义一致，但在本框架里，`lars` 的地位最特殊，因为它不仅能做稀疏回归，还能给出一条趋势项进入顺序，这条顺序会被 APCK 和 GEAPCK 用作 trend 搜索路径。因此，如果你不确定该怎么选，优先使用 `lars`。在纯 APC 中它是不错的默认值，在 APCK/GEAPCK 中则几乎是最自然的选择。
 
-第二组是模型族相关设置，即 `ModelType`、`PCKType` 和 `GradientMode`。`ModelType` 决定你训练的是哪一类模型，可选值是 `'apc'`、`'apck'` 和 `'geapck'`。这三个值分别对应纯多项式混沌、PCE 加 Kriging 残差、以及带梯度增强的 APCK。若你选择的是 `'apc'`，那么 `PCKType` 没有意义；若选择的是 `'apck'` 或 `'geapck'`，则必须再给 `PCKType`。`PCKType` 当前支持 `'sequential'` 和 `'optimal'`。所谓 `sequential`，是沿 LARS 趋势路径顺序扩展，每一步都继承上一步的 `theta` 作为初值；所谓 `optimal`，是把每个 trend 候选作为相对独立的模型进行评估，再根据最小 LOO 选最优者。前者更便宜，也更稳定；后者更自由，通常潜在精度更高，但训练代价更大。
+第二组是模型族相关设置，即 `ModelType`、`PCKType` 和 `GradientMode`。`ModelType` 决定你训练的是哪一类模型，可选值是 `'apc'`、`'apck'` 和 `'geapck'`。这三个值分别对应纯多项式混沌、PCE 加 Kriging 残差、以及带梯度增强的 APCK。若你选择的是 `'apc'`，那么 `PCKType` 没有意义；若选择的是 `'apck'` 或 `'geapck'`，则必须再给 `PCKType`。`PCKType` 当前支持 `'sequential'` 和 `'optimal'`。所谓 `sequential`，当前是直接使用最终 LARS 支撑集做一次 PCK 拟合；所谓 `optimal`，是把多个 trend 候选作为相对独立的模型进行评估，再根据最小 LOO 选最优者。前者更便宜，也更稳定；后者更自由，通常潜在精度更高，但训练代价更大。
 
 如果模型类型是 `geapck`，还会涉及 `GradientMode`。这个字段支持 `'provided'`、`'finite-difference'` 和 `'auto'`。`'provided'` 意味着你已经把训练点处的梯度矩阵放在 `data.dYdX_train` 里；`'finite-difference'` 意味着框架会调用 `data.ModelFcn` 做差分估计；`'auto'` 则表示若检测到你已经提供了 `dYdX_train` 就直接使用，否则自动回退到有限差分。在项目的实际使用中，如果有解析梯度，建议明确写 `provided`；如果没有解析梯度且模型函数可批量评估，可以用 `finite-difference`；如果你想写一个既能接解析梯度、也能自动回退差分的通用脚本，则用 `auto`。
 
@@ -156,9 +156,9 @@ APCK 和 GEAPCK 的本质都建立在 PCK 后端之上，而 PCK 后端里最重
 
 随机投影相关字段相对简单，主要是 `rp_type`、`rp_scale` 和 `rp_seed`。`rp_type` 支持 `'gaussian'` 和 `'rademacher'`，分别对应高斯随机矩阵和取值为 `±1` 的随机矩阵。`rp_scale` 则控制是否按 Johnson-Lindenstrauss 思路缩放，常见值是 `'jl'` 或 `'none'`。在需要一个便宜且快速的高维 baseline 时，随机投影往往很有帮助。
 
-第五组是 APCK/GEAPCK 的 Kriging 相关参数，也就是 `KrigingOpts`。这部分是很多人最关心、也最容易调得过多的地方。最核心的字段是 `KrigingOpts.corr`、`KrigingOpts.theta0`、`KrigingOpts.theta_lb`、`KrigingOpts.theta_ub`、`KrigingOpts.nugget`、`KrigingOpts.optimize_theta`、`KrigingOpts.max_trend_terms` 和 `KrigingOpts.DisplayProgress`。`corr` 支持 `'gaussian'`、`'exponential'` 和 `'matern32'`，但需要记住这只是 APCK 的全集；GEAPCK 当前只支持 `'gaussian'` 和 `'matern32'`，不支持 `'exponential'`。`theta0` 是长度尺度初值，若写成标量会自动扩展到每个输入维度；`theta_lb` 和 `theta_ub` 是长度尺度的下界与上界，同样支持标量自动扩展。`nugget` 是数值稳定项，用来改善协方差矩阵条件数。通常如果矩阵病态或训练点接近重复，适当增大 `nugget` 会更稳。
+第五组是 APCK/GEAPCK 的 Kriging 相关参数，也就是 `KrigingOpts`。这部分是很多人最关心、也最容易调得过多的地方。最核心的字段是 `KrigingOpts.corr`、`KrigingOpts.theta0`、`KrigingOpts.theta_lb`、`KrigingOpts.theta_ub`、`KrigingOpts.nugget`、`KrigingOpts.optimize_theta`、`KrigingOpts.trend_range`、`KrigingOpts.DisplayProgress` 和 `KrigingOpts.early_stop_patience`。`corr` 支持 `'gaussian'`、`'exponential'` 和 `'matern32'`，但需要记住这只是 APCK 的全集；GEAPCK 当前只支持 `'gaussian'` 和 `'matern32'`，不支持 `'exponential'`。`theta0` 是长度尺度初值，若写成标量会自动扩展到每个输入维度；`theta_lb` 和 `theta_ub` 是长度尺度的下界与上界，同样支持标量自动扩展。`nugget` 是数值稳定项，用来改善协方差矩阵条件数。通常如果矩阵病态或训练点接近重复，适当增大 `nugget` 会更稳。
 
-`optimize_theta` 决定长度尺度是否真的去优化。如果它是 `false`，后端会直接用 `theta0`；如果它是 `true`，就会在边界约束下用数值优化器搜索更优的 `theta`。这项设置对速度和精度影响都非常大，是 APCK/GEAPCK 中最值得你认真理解的开关之一。`max_trend_terms` 则控制沿 LARS 趋势路径评估多少个 trend 候选。它可以写成单个数，也可以写成两元素区间。若值不超过 1，会被解释为“LARS 路径比例”；若值大于 1，则会被解释为“绝对项数上限”。例如 `[0.1, 0.8]` 表示从前 10% 到前 80% 的趋势项长度区间中搜索。`DisplayProgress` 则只影响内部进度打印，不改变模型结果。
+`optimize_theta` 决定长度尺度是否真的去优化。如果它是 `false`，后端会直接用 `theta0`；如果它是 `true`，就会在边界约束下用数值优化器搜索更优的 `theta`。这项设置对速度和精度影响都非常大，是 APCK/GEAPCK 中最值得你认真理解的开关之一。`trend_range` 则控制沿 LARS 趋势路径评估多少个 trend 候选。它可以写成单个数，也可以写成两元素区间。若值不超过 1，会被解释为“LARS 路径比例”；若值大于 1，则会被解释为“绝对项数上限”。例如 `[0.1, 0.8]` 表示从前 10% 到前 80% 的趋势项长度区间中搜索。`DisplayProgress` 只影响内部进度打印，不改变模型结果。若你想让串行 `optimal` 在后段连续若干次都没有把当前最优 `LOO` 再降下来时提前停止，可以设置 `early_stop_patience`。例如设为 `3` 时，表示连续 3 个 trend 候选都没有刷新历史最好 `LOO` 就提前结束；默认这个功能关闭，不影响原有行为。
 
 第六组是差分梯度相关设置，也就是 `FDOpts`。这组字段只在 GEAPCK 且梯度模式允许差分回退时才起作用。当前主要有 `FDOpts.type` 和 `FDOpts.step`。`FDOpts.type` 支持 `'forward'` 和 `'central'`。前向差分更便宜，但精度稍低；中心差分更稳，代价也更高。`FDOpts.step` 是相对扰动步长，它会影响数值梯度的稳定性和精度。如果你发现差分梯度导致结果异常波动，可以先从步长检查起。
 

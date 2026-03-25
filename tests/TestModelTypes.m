@@ -32,7 +32,7 @@ ModelOpts.aPC_Method = 'stieltjes';
 ModelOpts.RegressionMethod = 'lars';
 ModelOpts.ModelType = 'apck';
 ModelOpts.PCKType = 'sequential';
-ModelOpts.KrigingOpts.max_trend_terms = [0.2, 0.8];
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.8];
 ModelOpts.Parallel = 0;
 
 [results, ModelOptsOut, ~, ReduceModel] = aPC_Train(data, ModelOpts);
@@ -95,7 +95,7 @@ ModelOpts.KrigingOpts.optimize_theta = true;
 ModelOpts.KrigingOpts.theta0 = 0.3;
 ModelOpts.KrigingOpts.theta_lb = 1e-3;
 ModelOpts.KrigingOpts.theta_ub = 10;
-ModelOpts.KrigingOpts.max_trend_terms = [0.2, 0.4];
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.4];
 
 [results, ~, ~, ~] = aPC_Train(data, ModelOpts);
 
@@ -126,7 +126,7 @@ ModelOpts.GradientMode = 'provided';
 ModelOpts.Parallel = 0;
 ModelOpts.KrigingOpts.optimize_theta = false;
 ModelOpts.KrigingOpts.theta0 = [0.7, 1.1];
-ModelOpts.KrigingOpts.max_trend_terms = [0.2, 0.2];
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.2];
 
 [results, ModelOptsOut, dataOut, ReduceModel] = aPC_Train(data, ModelOpts);
 Yhat = aPC_Predict(X, results, ModelOptsOut, ReduceModel);
@@ -152,7 +152,7 @@ ModelOpts.Parallel = 0;
 ModelOpts.KrigingOpts.corr = 'matern32';
 ModelOpts.KrigingOpts.optimize_theta = false;
 ModelOpts.KrigingOpts.theta0 = [0.8, 1.1];
-ModelOpts.KrigingOpts.max_trend_terms = [0.2, 0.4];
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.4];
 
 [results, ModelOptsOut, ~, ReduceModel] = aPC_Train(data, ModelOpts);
 Yhat = aPC_Predict(data.X_train, results, ModelOptsOut, ReduceModel);
@@ -184,7 +184,7 @@ ModelOpts.Parallel = 0;
 ModelOpts.KrigingOpts.corr = 'matern32';
 ModelOpts.KrigingOpts.optimize_theta = false;
 ModelOpts.KrigingOpts.theta0 = [0.9, 0.6];
-ModelOpts.KrigingOpts.max_trend_terms = [0.2, 0.2];
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.2];
 
 [results, ModelOptsOut, ~, ReduceModel] = aPC_Train(data, ModelOpts);
 Yhat = aPC_Predict(X, results, ModelOptsOut, ReduceModel);
@@ -218,7 +218,7 @@ ModelOpts.red_dim = 2;
 ModelOpts.Parallel = 0;
 ModelOpts.KrigingOpts.optimize_theta = false;
 ModelOpts.KrigingOpts.theta0 = [0.8, 1.2];
-ModelOpts.KrigingOpts.max_trend_terms = [0.2, 0.2];
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.2];
 
 [results, ModelOptsOut, dataOut, ReduceModel] = aPC_Train(data, ModelOpts);
 Yhat = aPC_Predict(X, results, ModelOptsOut, ReduceModel);
@@ -246,7 +246,7 @@ ModelOpts.ModelType = 'apck';
 ModelOpts.PCKType = 'optimal';
 ModelOpts.Parallel = 1;
 ModelOpts.KrigingOpts.optimize_theta = false;
-ModelOpts.KrigingOpts.max_trend_terms = [0.2, 0.2];
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.2];
 
 [results, ModelOptsOut, ~, ReduceModel] = aPC_Train(data, ModelOpts);
 Yhat = aPC_Predict(data.X_train, results, ModelOptsOut, ReduceModel);
@@ -267,7 +267,7 @@ ModelOpts.ModelType = 'apck';
 ModelOpts.PCKType = 'optimal';
 ModelOpts.Parallel = 1;
 ModelOpts.KrigingOpts.optimize_theta = false;
-ModelOpts.KrigingOpts.max_trend_terms = [0.2, 0.4];
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.4];
 
 [results, ~, ~, ~] = aPC_Train(data, ModelOpts);
 
@@ -286,7 +286,7 @@ ModelOpts.ModelType = 'apck';
 ModelOpts.PCKType = 'optimal';
 ModelOpts.Parallel = 1;
 ModelOpts.KrigingOpts.optimize_theta = false;
-ModelOpts.KrigingOpts.max_trend_terms = [0.2, 0.4];
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.4];
 
 out = evalc('[results, ~, ~, ~] = aPC_Train(data, ModelOpts);');
 
@@ -309,7 +309,7 @@ ModelOpts.ModelType = 'apck';
 ModelOpts.PCKType = 'optimal';
 ModelOpts.Parallel = 1;
 ModelOpts.KrigingOpts.optimize_theta = false;
-ModelOpts.KrigingOpts.max_trend_terms = [0.2, 0.2];
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.2];
 
 out = evalc('[~, ~, ~, ~] = aPC_Train(data, ModelOpts);');
 
@@ -348,13 +348,39 @@ ModelOpts.PCKType = 'optimal';
 ModelOpts.Parallel = 0;
 ModelOpts.KrigingOpts.optimize_theta = false;
 ModelOpts.KrigingOpts.DisplayProgress = true;
-ModelOpts.KrigingOpts.max_trend_terms = [0.2, 0.4];
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.4];
 
 out = evalc('[~, ~, ~, ~] = aPC_Train(data, ModelOpts);');
 
 verifyNotEmpty(testCase, strfind(out, '[aPC_PCKBackend] [Trend-Serial] trend 1/2')); %#ok<STREMP>
 verifyNotEmpty(testCase, strfind(out, '[aPC_PCKBackend] [Trend-Serial] trend 2/2')); %#ok<STREMP>
 verifyNotEmpty(testCase, strfind(out, '[###############---------------]')); %#ok<STREMP>
+end
+
+function testSerialOptimalPCKCanStopAfterConsecutiveNonImprovements(testCase)
+rng(1);
+data = makeData(24, 3);
+
+ModelOpts = struct();
+ModelOpts.Order = 4;
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.ModelType = 'apck';
+ModelOpts.PCKType = 'optimal';
+ModelOpts.Parallel = 0;
+ModelOpts.KrigingOpts.optimize_theta = false;
+ModelOpts.KrigingOpts.DisplayProgress = true;
+ModelOpts.KrigingOpts.trend_range = [1, 6];
+ModelOpts.KrigingOpts.early_stop_patience = 2;
+
+out = evalc('[~, ~, ~, ~] = aPC_Train(data, ModelOpts);');
+
+verifyNotEmpty(testCase, strfind(out, '[aPC_PCKBackend] [Trend-Serial] trend 1/5')); %#ok<STREMP>
+verifyNotEmpty(testCase, strfind(out, '[aPC_PCKBackend] [Trend-Serial] trend 2/5')); %#ok<STREMP>
+verifyNotEmpty(testCase, strfind(out, '[aPC_PCKBackend] [Trend-Serial] trend 3/5')); %#ok<STREMP>
+verifyNotEmpty(testCase, strfind(out, '[aPC_PCKBackend] [Trend-Serial] trend 4/5')); %#ok<STREMP>
+verifyEmpty(testCase, strfind(out, '[aPC_PCKBackend] [Trend-Serial] trend 5/5')); %#ok<STREMP>
 end
 
 function testSensitivityBlockedForAPCK(testCase)
@@ -367,7 +393,7 @@ ModelOpts.aPC_Method = 'stieltjes';
 ModelOpts.RegressionMethod = 'lars';
 ModelOpts.ModelType = 'apck';
 ModelOpts.PCKType = 'optimal';
-ModelOpts.KrigingOpts.max_trend_terms = [0.2, 0.8];
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.8];
 ModelOpts.Parallel = 0;
 
 [results, ModelOptsOut, ~, ~] = aPC_Train(data, ModelOpts);
