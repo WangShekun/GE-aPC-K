@@ -41,6 +41,7 @@ verifyEqual(testCase, lower(results.ModelType), 'apck');
 verifyEqual(testCase, lower(results.PCKType), 'sequential');
 verifyTrue(testCase, isempty(ReduceModel));
 verifyGreaterThanOrEqual(testCase, numel(results.PCKModel.trend_idx), 1);
+verifyEqual(testCase, sort(results.PCKModel.trend_idx), sort(results.lars_idx(:)'));
 
 Yhat = aPC_Predict(data.X_train, results, ModelOptsOut, ReduceModel);
 verifySize(testCase, Yhat, [size(data.X_train,1), 1]);

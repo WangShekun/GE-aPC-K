@@ -67,9 +67,24 @@ function results = aPC_PCKBackend(Psi, data_model, ModelOpts, basis_info)
         G_sub = [];
     end
 
+    if isfield(lars_res, 'lars_idx') && ~isempty(lars_res.lars_idx)
+        final_support = lars_res.lars_idx(:)';
+    else
+        final_support = find(abs(lars_res.coefficients(:)) > 1e-12).';
+    end
+    if isempty(final_support)
+        final_support = lars_order(1);
+    end
+    final_support = lars_order(ismember(lars_order, final_support));
+    if isempty(final_support)
+        final_support = find(abs(lars_res.coefficients(:)) > 1e-12).';
+    end
+
     best = struct('loo', inf);
-    theta_prev = [];
-    if strcmp(parallel_scope, 'trend') && strcmp(pck_type, 'optimal') && numel(trend_sizes) > 1
+    if strcmp(pck_type, 'sequential')
+        best = localEvaluateTrendIdx(final_support, 1, 1, 'serial', Psi_sub, U_sub, Y_sub, G_sub, ...
+            basis_info, idx_sub, KrigingOpts, use_ge, []);
+    elseif strcmp(parallel_scope, 'trend') && strcmp(pck_type, 'optimal') && numel(trend_sizes) > 1
         models = cell(1, numel(trend_sizes));
         dq = parallel.pool.DataQueue;
         cnt = 0;
@@ -87,12 +102,8 @@ function results = aPC_PCKBackend(Psi, data_model, ModelOpts, basis_info)
     else
         for i = 1:numel(trend_sizes)
             theta_init = [];
-            if strcmp(pck_type, 'sequential') && ~isempty(theta_prev)
-                theta_init = theta_prev;
-            end
             model_i = localEvaluateTrend(trend_sizes(i), i, numel(trend_sizes), 'serial', lars_order, Psi_sub, U_sub, Y_sub, G_sub, ...
                 basis_info, idx_sub, KrigingOpts, use_ge, theta_init);
-            theta_prev = model_i.theta;
 
             if model_i.loo < best.loo
                 best = model_i;
@@ -105,6 +116,9 @@ function results = aPC_PCKBackend(Psi, data_model, ModelOpts, basis_info)
     results.ModelType = model_type;
     results.PCKType = pck_type;
     results.coefficients = lars_res.coefficients;
+    if isfield(lars_res, 'lars_idx')
+        results.lars_idx = lars_res.lars_idx;
+    end
     results.LOO = best.loo;
     results.normEmpErr = best.normEmpErr;
     results.max_score = 1 - best.loo;
@@ -127,6 +141,12 @@ function model_i = localEvaluateTrend(trend_size, trend_pos, trend_total, progre
         basis_info, idx_sub, KrigingOpts, use_ge, theta_init)
     % Evaluate one trend size from the nested LARS path.
     trend_idx = lars_order(1:trend_size);
+    model_i = localEvaluateTrendIdx(trend_idx, trend_pos, trend_total, progress_mode, Psi_sub, U_sub, Y_sub, G_sub, ...
+        basis_info, idx_sub, KrigingOpts, use_ge, theta_init);
+end
+
+function model_i = localEvaluateTrendIdx(trend_idx, trend_pos, trend_total, progress_mode, Psi_sub, U_sub, Y_sub, G_sub, ...
+        basis_info, idx_sub, KrigingOpts, use_ge, theta_init)
     F = Psi_sub(:, trend_idx);
     dF = [];
     if use_ge
