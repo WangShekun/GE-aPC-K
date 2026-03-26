@@ -2,7 +2,7 @@ function results = aPC_RegressionMethods(X, Y, method)
 % PC_RegressionMethods  统一回归入口（各子函数均返回 results 结构体）
 % 支持：'OLS' | 'LARS' | 'Lasso' | 'Ridge'
 % 返回的 results 至少包含：
-%   .coefficients, .LOO, .normEmpErr, .method
+%   .coefficients, .LOO, .normEmpErr, .RegressionMethod
 %
 % 用法示例：
 %   res  = PC_RegressionMethods(Psi, y, 'OLS');

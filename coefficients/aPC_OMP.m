@@ -156,7 +156,7 @@ else
 end
 
 results.optErrorParams = optErrorParams;
-results.method = 'OMP';
+results.RegressionMethod = 'OMP';
 end
 
 function M = aPC_blockwise_inverse(Ainv,B,C,D)

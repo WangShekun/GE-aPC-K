@@ -25,7 +25,7 @@ hybrid_loo = 1;
 no_selection = 0;
 generalized_ls = 0;
 DisplayLevel = 0;
-use_lars_order = 0;
+use_lars_order = 1;
 
 %% OLS options
 olsoptions.modified_loo = modified_loo;
@@ -337,7 +337,7 @@ end
 
 results.LOO_lars = 1 - maxScore;
 
-results.method = 'LARS';
+results.RegressionMethod = 'LARS';
 results.optErrorParams = ols_results.optErrorParams;
 end
 
