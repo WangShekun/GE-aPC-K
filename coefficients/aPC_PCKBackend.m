@@ -126,7 +126,7 @@ function results = aPC_PCKBackend(Psi, data_model, ModelOpts, basis_info)
     end
 
     results = struct();
-    results.method = upper(model_type);
+    results.method = upper(ModelOpts.RegressionMethod);
     results.ModelType = model_type;
     results.PCKType = pck_type;
     results.coefficients = lars_res.coefficients;

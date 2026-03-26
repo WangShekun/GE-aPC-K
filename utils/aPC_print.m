@@ -27,8 +27,14 @@ function aPC_print(results, ModelOpts, data, varargin)
         localPrintKV('Total PCE terms', localFormatScalar(size(localGetArray(results, 'coefficients'), 1)));
 
         coeffs = localGetArray(results, 'coefficients');
-        if strcmpi(localGetString(results, 'method', ''), 'lars') && ~isempty(coeffs)
-            localPrintKV('Active terms', localFormatScalar(nnz(coeffs)));
+        active_terms = [];
+        if isfield(results, 'PCKModel') && isfield(results.PCKModel, 'trend_idx') && ~isempty(results.PCKModel.trend_idx)
+            active_terms = numel(results.PCKModel.trend_idx);
+        elseif strcmpi(localGetString(results, 'method', ''), 'lars') && ~isempty(coeffs)
+            active_terms = nnz(coeffs);
+        end
+        if ~isempty(active_terms)
+            localPrintKV('Active terms', localFormatScalar(active_terms));
         end
 
         fprintf('%s\n', divider);

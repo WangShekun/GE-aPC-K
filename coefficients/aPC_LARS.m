@@ -25,7 +25,7 @@ hybrid_loo = 1;
 no_selection = 0;
 generalized_ls = 0;
 DisplayLevel = 0;
-use_lars_order = 0;
+use_lars_order = 1;
 
 %% OLS options
 olsoptions.modified_loo = modified_loo;

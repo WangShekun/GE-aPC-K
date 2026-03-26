@@ -427,6 +427,27 @@ verifyNotEmpty(testCase, strfind(out, 'Dimension reduction')); %#ok<STREMP>
 verifyNotEmpty(testCase, strfind(out, 'Reduced dimension')); %#ok<STREMP>
 end
 
+function testAPCKPrintShowsLarsMethodAndSelectedTrendCount(testCase)
+data = makeData(20, 2);
+
+ModelOpts = struct();
+ModelOpts.Order = 3;
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.ModelType = 'apck';
+ModelOpts.PCKType = 'optimal';
+ModelOpts.Parallel = 0;
+ModelOpts.KrigingOpts.optimize_theta = false;
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.4];
+
+[results, ModelOptsOut, dataOut, ~] = aPC_Train(data, ModelOpts);
+out = evalc('aPC_print(results, ModelOptsOut, dataOut);');
+
+verifyNotEmpty(testCase, strfind(out, 'Regression method            : LARS')); %#ok<STREMP>
+verifyNotEmpty(testCase, strfind(out, sprintf('Active terms                 : %d', numel(results.PCKModel.trend_idx)))); %#ok<STREMP>
+end
+
 function testAPCPrintUQIsStructured(testCase)
 UQ = struct('mean', 1.2, 'var', 0.3, 'std', sqrt(0.3), 'CI95', [0.1 2.3], 'VaR95', 0.2);
 out = evalc('aPC_printUQ(UQ);');
