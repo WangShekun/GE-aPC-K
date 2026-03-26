@@ -34,22 +34,23 @@ function results = aPC_PCKBackend(Psi, data_model, ModelOpts, basis_info)
         parallel_scope = lower(strtrim(ModelOpts.ParallelScope));
     end
 
+    trend_builder = 'lars';
+    if isfield(ModelOpts, 'TrendBuilder') && ~isempty(ModelOpts.TrendBuilder)
+        trend_builder = lower(strtrim(ModelOpts.TrendBuilder));
+    end
+
     Y = data_model.Y_train(:);
     U = data_model.U;
     [N, d] = size(U);
 
-    lars_res = aPC_LARS(Psi, Y);
-    if isfield(lars_res, 'lars_idx') && ~isempty(lars_res.lars_idx)
-        lars_order = lars_res.lars_idx(:)';
-    else
-        lars_order = find(abs(lars_res.coefficients) > 0).';
+    trend_path_idx = localBuildTrendPath(Psi, Y, trend_builder);
+    trend_path_idx = unique(trend_path_idx, 'stable');
+    if isempty(trend_path_idx)
+        trend_path_idx = 1:min(size(Psi, 2), 1);
     end
-    lars_order = unique(lars_order, 'stable');
-    if isempty(lars_order)
-        lars_order = 1:min(size(Psi, 2), 1);
-    end
+    final_support = trend_path_idx;
 
-    [k_start, k_end] = localResolveTrendRange(KrigingOpts, numel(lars_order));
+    [k_start, k_end] = localResolveTrendRange(KrigingOpts, numel(trend_path_idx));
     trend_sizes = k_start:k_end;
 
     nmax = N;
@@ -74,17 +75,8 @@ function results = aPC_PCKBackend(Psi, data_model, ModelOpts, basis_info)
         G_sub = [];
     end
 
-    if isfield(lars_res, 'lars_idx') && ~isempty(lars_res.lars_idx)
-        final_support = lars_res.lars_idx(:)';
-    else
-        final_support = find(abs(lars_res.coefficients(:)) > 1e-12).';
-    end
     if isempty(final_support)
-        final_support = lars_order(1);
-    end
-    final_support = lars_order(ismember(lars_order, final_support));
-    if isempty(final_support)
-        final_support = find(abs(lars_res.coefficients(:)) > 1e-12).';
+        final_support = trend_path_idx(1);
     end
 
     best = struct('loo', inf);
@@ -98,7 +90,7 @@ function results = aPC_PCKBackend(Psi, data_model, ModelOpts, basis_info)
         bar_len = 30;
         afterEach(dq, @updateTrendBar);
         parfor i = 1:numel(trend_sizes)
-            models{i} = localEvaluateTrend(trend_sizes(i), i, numel(trend_sizes), 'parallel', lars_order, Psi_sub, U_sub, Y_sub, G_sub, ...
+            models{i} = localEvaluateTrend(trend_sizes(i), i, numel(trend_sizes), 'parallel', trend_path_idx, Psi_sub, U_sub, Y_sub, G_sub, ...
                 basis_info, idx_sub, KrigingOpts, use_ge, []);
             send(dq, i);
         end
@@ -110,7 +102,7 @@ function results = aPC_PCKBackend(Psi, data_model, ModelOpts, basis_info)
         no_improve_count = 0;
         for i = 1:numel(trend_sizes)
             theta_init = [];
-            model_i = localEvaluateTrend(trend_sizes(i), i, numel(trend_sizes), 'serial', lars_order, Psi_sub, U_sub, Y_sub, G_sub, ...
+            model_i = localEvaluateTrend(trend_sizes(i), i, numel(trend_sizes), 'serial', trend_path_idx, Psi_sub, U_sub, Y_sub, G_sub, ...
                 basis_info, idx_sub, KrigingOpts, use_ge, theta_init);
 
             if model_i.loo < best.loo
@@ -126,13 +118,11 @@ function results = aPC_PCKBackend(Psi, data_model, ModelOpts, basis_info)
     end
 
     results = struct();
-    results.method = upper(ModelOpts.RegressionMethod);
     results.ModelType = model_type;
     results.PCKType = pck_type;
-    results.coefficients = lars_res.coefficients;
-    if isfield(lars_res, 'lars_idx')
-        results.lars_idx = lars_res.lars_idx;
-    end
+    results.TrendBuilder = upper(trend_builder);
+    results.coefficients = zeros(size(Psi, 2), 1);
+    results.TrendPathIdx = trend_path_idx;
     results.LOO = best.loo;
     results.normEmpErr = best.normEmpErr;
     results.max_score = 1 - best.loo;
@@ -151,10 +141,10 @@ function results = aPC_PCKBackend(Psi, data_model, ModelOpts, basis_info)
     end
 end
 
-function model_i = localEvaluateTrend(trend_size, trend_pos, trend_total, progress_mode, lars_order, Psi_sub, U_sub, Y_sub, G_sub, ...
+function model_i = localEvaluateTrend(trend_size, trend_pos, trend_total, progress_mode, trend_path_idx, Psi_sub, U_sub, Y_sub, G_sub, ...
         basis_info, idx_sub, KrigingOpts, use_ge, theta_init)
     % Evaluate one trend size from the nested LARS path.
-    trend_idx = lars_order(1:trend_size);
+    trend_idx = trend_path_idx(1:trend_size);
     model_i = localEvaluateTrendIdx(trend_idx, trend_pos, trend_total, progress_mode, Psi_sub, U_sub, Y_sub, G_sub, ...
         basis_info, idx_sub, KrigingOpts, use_ge, theta_init);
 end
@@ -342,6 +332,21 @@ function [k_start, k_end] = localResolveTrendRange(KrigingOpts, total_terms)
     end
 
     error('aPC:InvalidTrendRange', 'KrigingOpts.trend_range must be scalar or 2-element vector.');
+end
+
+function trend_path_idx = localBuildTrendPath(Psi, Y, trend_builder)
+    switch lower(trend_builder)
+        case 'lars'
+            trend_res = aPC_LARS(Psi, Y);
+            if ~isfield(trend_res, 'lars_idx') || isempty(trend_res.lars_idx)
+                error('aPC:MissingLarsIdx', ...
+                    'TrendBuilder ''lars'' must return a non-empty lars_idx path.');
+            end
+            trend_path_idx = trend_res.lars_idx(:)';
+        otherwise
+            error('aPC:UnsupportedTrendBuilder', ...
+                'Unsupported TrendBuilder: %s. Currently only ''lars'' is supported.', trend_builder);
+    end
 end
 
 function k = localResolveOneBound(v, total_terms)

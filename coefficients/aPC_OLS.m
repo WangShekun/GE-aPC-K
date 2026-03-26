@@ -53,5 +53,5 @@ function results = aPC_OLS(Psi, Y)
     results.normEmpErr     = modifiednormEmpErr;   % 归一化经验误差
     results.optErrorParams = opt_results;              % 包含T修正因子等
     results.coeff_array    = coefficients(:).';        % 由于只是一个OLS，不需要多个迭代，直接把系数作为迭代轨迹
-    results.method = 'OLS';
+    results.RegressionMethod = 'OLS';
 end

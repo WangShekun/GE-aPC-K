@@ -337,7 +337,7 @@ end
 
 results.LOO_lars = 1 - maxScore;
 
-results.method = 'LARS';
+results.RegressionMethod = 'LARS';
 results.optErrorParams = ols_results.optErrorParams;
 end
 

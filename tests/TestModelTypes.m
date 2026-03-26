@@ -41,7 +41,7 @@ verifyEqual(testCase, lower(results.ModelType), 'apck');
 verifyEqual(testCase, lower(results.PCKType), 'sequential');
 verifyTrue(testCase, isempty(ReduceModel));
 verifyGreaterThanOrEqual(testCase, numel(results.PCKModel.trend_idx), 1);
-verifyEqual(testCase, sort(results.PCKModel.trend_idx), sort(results.lars_idx(:)'));
+verifyEqual(testCase, sort(results.PCKModel.trend_idx), sort(results.TrendPathIdx(:)'));
 
 Yhat = aPC_Predict(data.X_train, results, ModelOptsOut, ReduceModel);
 verifySize(testCase, Yhat, [size(data.X_train,1), 1]);
@@ -427,7 +427,7 @@ verifyNotEmpty(testCase, strfind(out, 'Dimension reduction')); %#ok<STREMP>
 verifyNotEmpty(testCase, strfind(out, 'Reduced dimension')); %#ok<STREMP>
 end
 
-function testAPCKPrintShowsLarsMethodAndSelectedTrendCount(testCase)
+function testAPCKPrintShowsTrendBuilderAndSelectedTrendCount(testCase)
 data = makeData(20, 2);
 
 ModelOpts = struct();
@@ -435,6 +435,7 @@ ModelOpts.Order = 3;
 ModelOpts.qnorm = 1.0;
 ModelOpts.aPC_Method = 'stieltjes';
 ModelOpts.RegressionMethod = 'lars';
+ModelOpts.TrendBuilder = 'lars';
 ModelOpts.ModelType = 'apck';
 ModelOpts.PCKType = 'optimal';
 ModelOpts.Parallel = 0;
@@ -444,8 +445,25 @@ ModelOpts.KrigingOpts.trend_range = [0.2, 0.4];
 [results, ModelOptsOut, dataOut, ~] = aPC_Train(data, ModelOpts);
 out = evalc('aPC_print(results, ModelOptsOut, dataOut);');
 
-verifyNotEmpty(testCase, strfind(out, 'Regression method            : LARS')); %#ok<STREMP>
+verifyEmpty(testCase, strfind(out, 'Regression method')); %#ok<STREMP>
+verifyNotEmpty(testCase, strfind(out, 'Trend builder                : LARS')); %#ok<STREMP>
 verifyNotEmpty(testCase, strfind(out, sprintf('Active terms                 : %d', numel(results.PCKModel.trend_idx)))); %#ok<STREMP>
+end
+
+function testAPCKRejectsUnsupportedTrendBuilder(testCase)
+data = makeData(20, 2);
+
+ModelOpts = struct();
+ModelOpts.Order = 3;
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.TrendBuilder = 'omp';
+ModelOpts.ModelType = 'apck';
+ModelOpts.PCKType = 'optimal';
+ModelOpts.Parallel = 0;
+
+verifyError(testCase, @() aPC_Train(data, ModelOpts), 'aPC:UnsupportedTrendBuilder');
 end
 
 function testAPCPrintUQIsStructured(testCase)
@@ -492,7 +510,7 @@ end
 
 function [results, ModelOpts, data] = makePrintFixture(modelType, withReduction)
 results = struct();
-results.method = 'LARS';
+results.RegressionMethod = 'LARS';
 results.ModelType = lower(modelType);
 results.PCKType = 'optimal';
 results.coefficients = [1; 0; 2];

@@ -13,7 +13,7 @@ ModelOpts.Order = [5];                  % 多项式总阶数 p；可设为标量
 ModelOpts.qnorm = [0.8];                % q-norm 截断参数；越小越稀疏
 ModelOpts.aPC_Method = 'stieltjes';     % 一维 aPC 构造方法：'2012' | '2018' | 'stieltjes'
 ModelOpts.RegressionMethod = 'lars';    % APC trend 的回归器：通常用 'lars'
-
+ModelOpts.TrendBuilder = 'lars';
 % === 模型选择设置 ===
 ModelOpts.ModelType = 'apck';           % 模型类型：'apc' | 'apck' | 'geapck'
 ModelOpts.PCKType = 'optimal';          % PCK 策略：'sequential' | 'optimal'
@@ -209,8 +209,8 @@ function out = run_apc_family(data, ModelOpts, model_name, Benchmark)
 
     t_train = tic;
     [results, opts_out, data, ReduceModel] = aPC_Train(data, opts);
-    aPC_print(results, opts_out, data);
     train_sec = toc(t_train);
+    aPC_print(results, opts_out, data);
 
     t_pred = tic;
     y_pred = aPC_Predict(data.X_val, results, opts_out, ReduceModel);

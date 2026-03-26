@@ -14,12 +14,20 @@ function aPC_print(results, ModelOpts, data, varargin)
 
     if any(modules == "basic")
         localPrintSection('Model Summary', width);
-        localPrintKV('Regression method', upper(localGetString(results, 'method', '-')));
+        regression_method = localGetString(results, 'RegressionMethod', '');
+        if strlength(regression_method) > 0
+            localPrintKV('Regression method', upper(regression_method));
+        end
         localPrintKV('Model type', upper(localGetString(results, 'ModelType', 'APC')));
 
         pck_type = localGetString(results, 'PCKType', 'none');
         if ~strcmpi(pck_type, 'none')
             localPrintKV('PCK type', upper(pck_type));
+        end
+
+        trend_builder = localGetString(results, 'TrendBuilder', '');
+        if strlength(trend_builder) > 0
+            localPrintKV('Trend builder', upper(trend_builder));
         end
 
         localPrintKV('Max polynomial order', localFormatScalar(localGetNumeric(ModelOpts, 'Order', '-')));
@@ -30,7 +38,7 @@ function aPC_print(results, ModelOpts, data, varargin)
         active_terms = [];
         if isfield(results, 'PCKModel') && isfield(results.PCKModel, 'trend_idx') && ~isempty(results.PCKModel.trend_idx)
             active_terms = numel(results.PCKModel.trend_idx);
-        elseif strcmpi(localGetString(results, 'method', ''), 'lars') && ~isempty(coeffs)
+        elseif strcmpi(localGetString(results, 'RegressionMethod', ''), 'lars') && ~isempty(coeffs)
             active_terms = nnz(coeffs);
         end
         if ~isempty(active_terms)
