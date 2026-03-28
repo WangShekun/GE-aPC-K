@@ -22,7 +22,7 @@ ModelOpts.Parallel = 0;                 % 是否并行搜索候选配置：0/1
 
 % === 降维设置 ===
 % ModelOpts.ReductionMethod = 'pls';    % 降维方法：'pls' | 'pca' | 'kpca' | 'mcp' | 'ica' | 'rp' | ...
-% ModelOpts.red_dim = [2];              % 降维后的目标维数；可设为标量或搜索向量
+% ModelOpts.red_dim = [10];              % 降维后的目标维数；可设为标量或搜索向量
 
 % === KPCA / SKPCA 输入核设置 ===
 % ModelOpts.kernel_type = {'gaussian'}; % 输入核类型
@@ -276,6 +276,10 @@ function spec = get_benchmark_spec(name)
             spec.InputOpts = morris10_Input;
             spec.ModelFcn = @morris10;
             spec.GradFcn = @morris10_grad;
+
+        case 'dim100'
+            spec.InputOpts = dim100_Input;
+            spec.ModelFcn = @dim100;
 
         otherwise
             error('Unsupported benchmark: %s', name);
