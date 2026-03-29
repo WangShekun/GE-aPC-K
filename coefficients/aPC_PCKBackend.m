@@ -70,7 +70,7 @@ function results = aPC_PCKBackend(Psi, data_model, ModelOpts, basis_info)
         final_support = trend_path_idx(1);
     end
 
-    best = struct('loo', inf);
+    best = struct();
     if strcmp(pck_type, 'sequential')
         best = localEvaluateTrendIdx(final_support, 1, 1, 'serial', Psi, U, Y, G, ...
             basis_info, KrigingOpts, use_ge, []);
@@ -103,7 +103,7 @@ function results = aPC_PCKBackend(Psi, data_model, ModelOpts, basis_info)
                 theta_prev = model_i.theta;
             end
 
-            if model_i.loo < best.loo
+            if ~isfield(best, 'trend_idx') || model_i.loo < best.loo
                 best = model_i;
                 no_improve_count = 0;
             else
@@ -235,20 +235,26 @@ end
 
 function model = localBuildModel(theta, F, dF, Y, U, G, KrigingOpts, use_ge)
     [~, core] = localEvalThetaCore(theta, F, dF, Y, U, G, KrigingOpts, use_ge);
-
     L = core.L;
-    alpha = core.alpha;
-    residual = core.residual;
-    Uinv = L' \ eye(size(L));
-    Kinv_diag = sum(Uinv.^2, 2);
-    loo_res = alpha ./ max(Kinv_diag, eps);
-    if use_ge
-        Nf = size(Y, 1);
-        loo = mean(loo_res(1:Nf).^2) / max(var(Y, 1), eps);
-        normEmpErr = mean(residual(1:Nf).^2) / max(var(Y, 1), eps);
+
+    if core.chol_failed
+        alpha = core.alpha;
+        loo = inf;
+        normEmpErr = inf;
     else
-        loo = mean(loo_res.^2) / max(var(Y, 1), eps);
-        normEmpErr = mean(residual.^2) / max(var(Y, 1), eps);
+        alpha = core.alpha;
+        residual = core.residual;
+        Uinv = L' \ eye(size(L));
+        Kinv_diag = sum(Uinv.^2, 2);
+        loo_res = alpha ./ max(Kinv_diag, eps);
+        if use_ge
+            Nf = size(Y, 1);
+            loo = mean(loo_res(1:Nf).^2) / max(var(Y, 1), eps);
+            normEmpErr = mean(residual(1:Nf).^2) / max(var(Y, 1), eps);
+        else
+            loo = mean(loo_res.^2) / max(var(Y, 1), eps);
+            normEmpErr = mean(residual.^2) / max(var(Y, 1), eps);
+        end
     end
 
     model = struct();
@@ -304,6 +310,7 @@ function [nll, core] = localEvalThetaCore(theta, F, dF, Y, U, G, KrigingOpts, us
     core.L = L;
     core.F = F;
     core.residual = residual;
+    core.chol_failed = false;
 end
 
 function core = localFallbackCore(F, Y, U, use_ge)
@@ -314,6 +321,7 @@ function core = localFallbackCore(F, Y, U, use_ge)
     core.L = eye(numel(core.alpha));
     core.F = F;
     core.residual = inf(size(core.alpha));
+    core.chol_failed = true;
 end
 
 function S = localSetDef(S, field, val)

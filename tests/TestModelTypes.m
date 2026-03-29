@@ -132,6 +132,38 @@ verifyTrue(testCase, isfinite(results.PCKModel.loo));
 verifyTrue(testCase, isfinite(results.PCKModel.normEmpErr));
 end
 
+function testAPCKCholeskyFailureDoesNotLookLikePerfectLOO(testCase)
+X = [0 0; 0 0; 0.5 -0.2; -0.5 0.3];
+Y = sin(X(:,1)) + X(:,2).^2;
+
+data = struct();
+data.X_train = X;
+data.Y_train = Y;
+
+ModelOpts = struct();
+ModelOpts.Order = 2;
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.ModelType = 'apck';
+ModelOpts.PCKType = 'optimal';
+ModelOpts.Parallel = 0;
+ModelOpts.KrigingOpts.optimize_theta = false;
+ModelOpts.KrigingOpts.theta0 = [0.7, 1.1];
+ModelOpts.KrigingOpts.nugget = 0;
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.2];
+
+[results, ~, ~, ~] = aPC_Train(data, ModelOpts);
+
+verifyTrue(testCase, isinf(results.LOO));
+verifyTrue(testCase, isinf(results.normEmpErr));
+verifyTrue(testCase, isinf(results.PCKModel.loo));
+verifyTrue(testCase, isinf(results.PCKModel.normEmpErr));
+verifyFalse(testCase, isempty(results.PCKModel.trend_idx));
+verifyEqual(testCase, results.coefficients(results.PCKModel.trend_idx), ...
+    zeros(numel(results.PCKModel.trend_idx), 1), 'AbsTol', 1e-12);
+end
+
 function testAPCKSerialOptimalWarmStartsThetaAfterFirstTrend(testCase)
 rng(11);
 data = makeData(22, 2);
