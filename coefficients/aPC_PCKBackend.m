@@ -242,7 +242,6 @@ function model = localBuildModel(theta, F, dF, Y, U, G, KrigingOpts, use_ge)
         loo = inf;
         normEmpErr = inf;
     else
-        L = core.L;
         alpha = core.alpha;
         residual = core.residual;
         Uinv = L' \ eye(size(L));
