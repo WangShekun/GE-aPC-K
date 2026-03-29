@@ -22,7 +22,7 @@ ModelOpts.Parallel = 0;                 % 是否并行搜索候选配置：0/1
 
 % === 降维设置 ===
 % ModelOpts.ReductionMethod = 'pls';    % 降维方法：'pls' | 'pca' | 'kpca' | 'mcp' | 'ica' | 'rp' | ...
-% ModelOpts.red_dim = [10];              % 降维后的目标维数；可设为标量或搜索向量
+% ModelOpts.red_dim = [2];              % 降维后的目标维数；可设为标量或搜索向量
 
 % === KPCA / SKPCA 输入核设置 ===
 % ModelOpts.kernel_type = {'gaussian'}; % 输入核类型
@@ -79,7 +79,7 @@ ModelOpts.KrigingOpts.DisplayProgress = true;% 是否显示 sequential/optimal �
 Benchmark.Name = 'ishigami';          % 'ishigami' | 'wingweight' | 'morris10'
 Benchmark.N_train = 200;
 Benchmark.N_val = 2000;
-Benchmark.GradientSource = 'finite-difference';  % 'analytic' | 'finite-difference' | 'auto'
+Benchmark.GradientSource = 'finite-difference';  % 'provided' | 'finite-difference' | 'auto'
 Benchmark.FDType = 'central';           % 'forward' | 'central'
 Benchmark.FDStep = 1e-6;                % 差分相对步长
 
