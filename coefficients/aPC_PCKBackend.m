@@ -53,26 +53,17 @@ function results = aPC_PCKBackend(Psi, data_model, ModelOpts, basis_info)
     [k_start, k_end] = localResolveTrendRange(KrigingOpts, numel(trend_path_idx));
     trend_sizes = k_start:k_end;
 
-    nmax = N;
     if use_ge
         if ~isfield(data_model, 'dY_model') || isempty(data_model.dY_model)
             error('aPC:MissingModelGradient', 'GEAPCK requires prepared model-space gradients.');
         end
+        basis_info = localAddUnivDerivativeCache(U, basis_info);
     end
 
-    idx_sub = 1:N;
-    if N > nmax
-        rng(7);
-        idx_sub = sort(randperm(N, nmax));
-    end
-
-    U_sub = U(idx_sub, :);
-    Y_sub = Y(idx_sub);
-    Psi_sub = Psi(idx_sub, :);
     if use_ge
-        G_sub = data_model.dY_model(idx_sub, :);
+        G = data_model.dY_model;
     else
-        G_sub = [];
+        G = [];
     end
 
     if isempty(final_support)
@@ -81,8 +72,8 @@ function results = aPC_PCKBackend(Psi, data_model, ModelOpts, basis_info)
 
     best = struct('loo', inf);
     if strcmp(pck_type, 'sequential')
-        best = localEvaluateTrendIdx(final_support, 1, 1, 'serial', Psi_sub, U_sub, Y_sub, G_sub, ...
-            basis_info, idx_sub, KrigingOpts, use_ge, []);
+        best = localEvaluateTrendIdx(final_support, 1, 1, 'serial', Psi, U, Y, G, ...
+            basis_info, KrigingOpts, use_ge, []);
     elseif strcmp(parallel_scope, 'trend') && strcmp(pck_type, 'optimal') && numel(trend_sizes) > 1
         models = cell(1, numel(trend_sizes));
         dq = parallel.pool.DataQueue;
@@ -90,8 +81,8 @@ function results = aPC_PCKBackend(Psi, data_model, ModelOpts, basis_info)
         bar_len = 30;
         afterEach(dq, @updateTrendBar);
         parfor i = 1:numel(trend_sizes)
-            models{i} = localEvaluateTrend(trend_sizes(i), i, numel(trend_sizes), 'parallel', trend_path_idx, Psi_sub, U_sub, Y_sub, G_sub, ...
-                basis_info, idx_sub, KrigingOpts, use_ge, []);
+            models{i} = localEvaluateTrend(trend_sizes(i), i, numel(trend_sizes), 'parallel', trend_path_idx, Psi, U, Y, G, ...
+                basis_info, KrigingOpts, use_ge, []);
             send(dq, i);
         end
         fprintf('\n');
@@ -100,10 +91,17 @@ function results = aPC_PCKBackend(Psi, data_model, ModelOpts, basis_info)
         best = models{best_idx};
     else
         no_improve_count = 0;
+        theta_prev = [];
         for i = 1:numel(trend_sizes)
             theta_init = [];
-            model_i = localEvaluateTrend(trend_sizes(i), i, numel(trend_sizes), 'serial', trend_path_idx, Psi_sub, U_sub, Y_sub, G_sub, ...
-                basis_info, idx_sub, KrigingOpts, use_ge, theta_init);
+            if strcmp(pck_type, 'optimal') && KrigingOpts.optimize_theta && ~isempty(theta_prev)
+                theta_init = theta_prev;
+            end
+            model_i = localEvaluateTrend(trend_sizes(i), i, numel(trend_sizes), 'serial', trend_path_idx, Psi, U, Y, G, ...
+                basis_info, KrigingOpts, use_ge, theta_init);
+            if strcmp(pck_type, 'optimal') && KrigingOpts.optimize_theta && all(isfinite(model_i.theta))
+                theta_prev = model_i.theta;
+            end
 
             if model_i.loo < best.loo
                 best = model_i;
@@ -121,14 +119,15 @@ function results = aPC_PCKBackend(Psi, data_model, ModelOpts, basis_info)
     results.ModelType = model_type;
     results.PCKType = pck_type;
     results.TrendBuilder = upper(trend_builder);
+    results.PCKModel = best;
     results.coefficients = zeros(size(Psi, 2), 1);
+    results.coefficients(best.trend_idx) = best.beta;
     results.TrendPathIdx = trend_path_idx;
     results.LOO = best.loo;
     results.normEmpErr = best.normEmpErr;
     results.max_score = 1 - best.loo;
     results.optErrorParams = struct('loo', best.loo, 'criterion', 'kriging-approx-loo');
-    results.PCKModel = best;
-    results.PCKModel.U_train = U_sub;
+    results.PCKModel.U_train = U;
     results.PCKModel.corr = KrigingOpts.corr;
     results.PCKModel.nugget = KrigingOpts.nugget;
     results.PCKModel.use_ge = use_ge;
@@ -141,27 +140,27 @@ function results = aPC_PCKBackend(Psi, data_model, ModelOpts, basis_info)
     end
 end
 
-function model_i = localEvaluateTrend(trend_size, trend_pos, trend_total, progress_mode, trend_path_idx, Psi_sub, U_sub, Y_sub, G_sub, ...
-        basis_info, idx_sub, KrigingOpts, use_ge, theta_init)
+function model_i = localEvaluateTrend(trend_size, trend_pos, trend_total, progress_mode, trend_path_idx, Psi, U, Y, G, ...
+        basis_info, KrigingOpts, use_ge, theta_init)
     % Evaluate one trend size from the nested LARS path.
     trend_idx = trend_path_idx(1:trend_size);
-    model_i = localEvaluateTrendIdx(trend_idx, trend_pos, trend_total, progress_mode, Psi_sub, U_sub, Y_sub, G_sub, ...
-        basis_info, idx_sub, KrigingOpts, use_ge, theta_init);
+    model_i = localEvaluateTrendIdx(trend_idx, trend_pos, trend_total, progress_mode, Psi, U, Y, G, ...
+        basis_info, KrigingOpts, use_ge, theta_init);
 end
 
-function model_i = localEvaluateTrendIdx(trend_idx, trend_pos, trend_total, progress_mode, Psi_sub, U_sub, Y_sub, G_sub, ...
-        basis_info, idx_sub, KrigingOpts, use_ge, theta_init)
-    F = Psi_sub(:, trend_idx);
+function model_i = localEvaluateTrendIdx(trend_idx, trend_pos, trend_total, progress_mode, Psi, U, Y, G, ...
+        basis_info, KrigingOpts, use_ge, theta_init)
+    F = Psi(:, trend_idx);
     dF = [];
     if use_ge
-        dF = localBuildTrendGradientMatrix(U_sub, basis_info, idx_sub, trend_idx);
+        dF = localBuildTrendGradientMatrix(U, basis_info, trend_idx);
     end
 
     if KrigingOpts.DisplayProgress && strcmp(progress_mode, 'serial')
         fprintf('%s\n', localFormatTrendProgress('serial', trend_pos, trend_total, 30));
     end
 
-    model_i = localFitOne(F, dF, Y_sub, U_sub, G_sub, KrigingOpts, theta_init, use_ge);
+    model_i = localFitOne(F, dF, Y, U, G, KrigingOpts, theta_init, use_ge);
     model_i.trend_idx = trend_idx;
 end
 
@@ -214,7 +213,7 @@ function model = localFitOne(F, dF, Y, U, G, KrigingOpts, theta_init, use_ge)
             'Display', 'off', ...
             'MaxIterations', 80, ...
             'MaxFunctionEvaluations', 300);
-        zopt = fmincon(@(z) localNLL(exp(z), F, dF, Y, U, G, KrigingOpts, use_ge), ...
+        zopt = fmincon(@(z) localNLLOnly(exp(z), F, dF, Y, U, G, KrigingOpts, use_ge), ...
             z0, [], [], [], [], zlb, zub, [], opts);
         theta = exp(zopt);
         theta_optimizer = 'fmincon';
@@ -224,14 +223,47 @@ function model = localFitOne(F, dF, Y, U, G, KrigingOpts, theta_init, use_ge)
     end
 
     theta = min(max(theta, theta_lb), theta_ub);
-    [~, model] = localNLL(theta, F, dF, Y, U, G, KrigingOpts, use_ge);
+    model = localBuildModel(theta, F, dF, Y, U, G, KrigingOpts, use_ge);
     model.theta = theta;
+    model.theta_init_used = theta0;
     model.theta_optimizer = theta_optimizer;
 end
 
-function [nll, model] = localNLL(theta, F, dF, Y, U, G, KrigingOpts, use_ge)
+function nll = localNLLOnly(theta, F, dF, Y, U, G, KrigingOpts, use_ge)
+    [nll, ~] = localEvalThetaCore(theta, F, dF, Y, U, G, KrigingOpts, use_ge);
+end
+
+function model = localBuildModel(theta, F, dF, Y, U, G, KrigingOpts, use_ge)
+    [~, core] = localEvalThetaCore(theta, F, dF, Y, U, G, KrigingOpts, use_ge);
+
+    L = core.L;
+    alpha = core.alpha;
+    residual = core.residual;
+    Uinv = L' \ eye(size(L));
+    Kinv_diag = sum(Uinv.^2, 2);
+    loo_res = alpha ./ max(Kinv_diag, eps);
+    if use_ge
+        Nf = size(Y, 1);
+        loo = mean(loo_res(1:Nf).^2) / max(var(Y, 1), eps);
+        normEmpErr = mean(residual(1:Nf).^2) / max(var(Y, 1), eps);
+    else
+        loo = mean(loo_res.^2) / max(var(Y, 1), eps);
+        normEmpErr = mean(residual.^2) / max(var(Y, 1), eps);
+    end
+
+    model = struct();
+    model.beta = core.beta;
+    model.alpha = alpha;
+    model.K = core.K;
+    model.L = L;
+    model.F = F;
+    model.loo = loo;
+    model.normEmpErr = normEmpErr;
+end
+
+function [nll, core] = localEvalThetaCore(theta, F, dF, Y, U, G, KrigingOpts, use_ge)
     % Evaluate the likelihood objective and recover the GLS/Kriging quantities
-    % needed for prediction and approximate LOO.
+    % needed for final model assembly.
     if use_ge
         [K, y_aug, H] = pckBuildAugmentedSystem(U, Y, G, F, dF, theta, KrigingOpts.corr, KrigingOpts.nugget);
     else
@@ -245,7 +277,7 @@ function [nll, model] = localNLL(theta, F, dF, Y, U, G, KrigingOpts, use_ge)
     [L, p] = chol(K, 'lower');
     if p ~= 0
         nll = 1e12;
-        model = localFallbackModel(F, Y, U, use_ge);
+        core = localFallbackCore(F, Y, U, use_ge);
         return;
     end
 
@@ -265,38 +297,23 @@ function [nll, model] = localNLL(theta, F, dF, Y, U, G, KrigingOpts, use_ge)
     sigma2 = max((residual' * alpha) / nobs, eps);
     nll = nobs * log(sigma2) + 2 * sum(log(diag(L)));
 
-    Uinv = L' \ eye(size(L));
-    Kinv_diag = sum(Uinv.^2, 2);
-    % Fast approximate LOO for Kriging/PCK based on diag(K^{-1}).
-    loo_res = alpha ./ max(Kinv_diag, eps);
-    if use_ge
-        Nf = size(Y, 1);
-        loo = mean(loo_res(1:Nf).^2) / max(var(Y, 1), eps);
-        normEmpErr = mean(residual(1:Nf).^2) / max(var(Y, 1), eps);
-    else
-        loo = mean(loo_res.^2) / max(var(Y, 1), eps);
-        normEmpErr = mean(residual.^2) / max(var(Y, 1), eps);
-    end
-
-    model = struct();
-    model.beta = beta;
-    model.alpha = alpha;
-    model.K = K;
-    model.L = L;
-    model.F = F;
-    model.loo = loo;
-    model.normEmpErr = normEmpErr;
+    core = struct();
+    core.beta = beta;
+    core.alpha = alpha;
+    core.K = K;
+    core.L = L;
+    core.F = F;
+    core.residual = residual;
 end
 
-function model = localFallbackModel(F, Y, U, use_ge)
-    model = struct();
-    model.beta = zeros(size(F, 2), 1);
-    model.alpha = zeros(size(Y, 1) * (1 + use_ge * size(U, 2)), 1);
-    model.K = eye(numel(model.alpha));
-    model.L = eye(numel(model.alpha));
-    model.F = F;
-    model.loo = inf;
-    model.normEmpErr = inf;
+function core = localFallbackCore(F, Y, U, use_ge)
+    core = struct();
+    core.beta = zeros(size(F, 2), 1);
+    core.alpha = zeros(size(Y, 1) * (1 + use_ge * size(U, 2)), 1);
+    core.K = eye(numel(core.alpha));
+    core.L = eye(numel(core.alpha));
+    core.F = F;
+    core.residual = inf(size(core.alpha));
 end
 
 function S = localSetDef(S, field, val)
@@ -360,13 +377,13 @@ function k = localResolveOneBound(v, total_terms)
     end
 end
 
-function dF = localBuildTrendGradientMatrix(U_sub, basis_info, idx_sub, trend_idx)
+function dF = localBuildTrendGradientMatrix(U, basis_info, trend_idx)
     Indices = basis_info.Indices(trend_idx, :);
-    poly_coeffs = basis_info.poly_coeffs;
-    univ_vals = basis_info.univ_vals(idx_sub, :, :);
+    univ_vals = basis_info.univ_vals;
+    univ_dvals = basis_info.univ_dvals;
 
-    N = size(U_sub, 1);
-    M = size(U_sub, 2);
+    N = size(U, 1);
+    M = size(U, 2);
     K = size(Indices, 1);
     dF = zeros(N * M, K);
 
@@ -377,13 +394,7 @@ function dF = localBuildTrendGradientMatrix(U_sub, basis_info, idx_sub, trend_id
             for j = 1:M
                 deg = Indices(t, j);
                 if j == a
-                    coeff = poly_coeffs{j}{deg + 1};
-                    dcoeff = polyder(coeff);
-                    if isempty(dcoeff)
-                        val = zeros(N, 1);
-                    else
-                        val = polyval(dcoeff, U_sub(:, j));
-                    end
+                    val = univ_dvals(:, j, deg + 1);
                 else
                     val = univ_vals(:, j, deg + 1);
                 end
@@ -392,4 +403,29 @@ function dF = localBuildTrendGradientMatrix(U_sub, basis_info, idx_sub, trend_id
             dF(rows, t) = term_val;
         end
     end
+end
+
+function basis_info = localAddUnivDerivativeCache(U, basis_info)
+    if isfield(basis_info, 'univ_dvals') && ~isempty(basis_info.univ_dvals)
+        return;
+    end
+
+    poly_coeffs = basis_info.poly_coeffs;
+    univ_vals = basis_info.univ_vals;
+    [N, M, P1] = size(univ_vals);
+    univ_dvals = zeros(N, M, P1);
+
+    for j = 1:M
+        uj = U(:, j);
+        for k = 1:P1
+            dcoeff = polyder(poly_coeffs{j}{k});
+            if isempty(dcoeff)
+                univ_dvals(:, j, k) = 0;
+            else
+                univ_dvals(:, j, k) = polyval(dcoeff, uj);
+            end
+        end
+    end
+
+    basis_info.univ_dvals = univ_dvals;
 end

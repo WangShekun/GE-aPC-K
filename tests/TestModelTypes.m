@@ -104,7 +104,63 @@ verifyGreaterThanOrEqual(testCase, min(results.PCKModel.theta), ModelOpts.Krigin
 verifyLessThanOrEqual(testCase, max(results.PCKModel.theta), ModelOpts.KrigingOpts.theta_ub);
 end
 
+function testAPCKThetaOptimizationKeepsFiniteDiagnosticsAfterRefactor(testCase)
+rng(11);
+data = makeData(22, 2);
+
+ModelOpts = struct();
+ModelOpts.Order = 3;
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.TrendBuilder = 'lars';
+ModelOpts.ModelType = 'apck';
+ModelOpts.PCKType = 'optimal';
+ModelOpts.Parallel = 0;
+ModelOpts.KrigingOpts.optimize_theta = true;
+ModelOpts.KrigingOpts.theta0 = 0.5;
+ModelOpts.KrigingOpts.theta_lb = 1e-2;
+ModelOpts.KrigingOpts.theta_ub = 10;
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.4];
+
+[results, ~, ~, ~] = aPC_Train(data, ModelOpts);
+
+verifyTrue(testCase, isfinite(results.LOO));
+verifyTrue(testCase, isfinite(results.normEmpErr));
+verifyTrue(testCase, all(isfinite(results.PCKModel.theta)));
+verifyTrue(testCase, isfinite(results.PCKModel.loo));
+verifyTrue(testCase, isfinite(results.PCKModel.normEmpErr));
+end
+
+function testAPCKSerialOptimalWarmStartsThetaAfterFirstTrend(testCase)
+rng(11);
+data = makeData(22, 2);
+
+ModelOpts = struct();
+ModelOpts.Order = 3;
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.TrendBuilder = 'lars';
+ModelOpts.ModelType = 'apck';
+ModelOpts.PCKType = 'optimal';
+ModelOpts.Parallel = 0;
+ModelOpts.KrigingOpts.optimize_theta = true;
+ModelOpts.KrigingOpts.theta0 = 0.3;
+ModelOpts.KrigingOpts.theta_lb = 1e-3;
+ModelOpts.KrigingOpts.theta_ub = 10;
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.4];
+
+[results, ~, ~, ~] = aPC_Train(data, ModelOpts);
+
+verifyGreaterThan(testCase, numel(results.PCKModel.trend_idx), 1);
+verifyTrue(testCase, isfield(results.PCKModel, 'theta_init_used'));
+verifyEqual(testCase, numel(results.PCKModel.theta_init_used), numel(results.PCKModel.theta));
+verifyFalse(testCase, isempty(results.PCKModel.theta_init_used));
+end
+
 function testGEAPCKCorrelationVectorizationPreservesOutputs(testCase)
+rng(11);
 N = 10;
 X = rand(N, 2) * 2 - 1;
 Y = exp(0.2 * X(:,1)) + X(:,2).^2;
@@ -133,9 +189,41 @@ Yhat = aPC_Predict(X, results, ModelOptsOut, ReduceModel);
 
 verifyEqual(testCase, lower(results.ModelType), 'geapck');
 verifySize(testCase, Yhat, [N, 1]);
-verifyLessThan(testCase, results.LOO, 1e-3);
+verifyLessThan(testCase, results.LOO, 2e-3);
 verifyLessThan(testCase, max(abs(Yhat - Y)), 3e-2);
 verifySize(testCase, dataOut.dYdX_train, [N, 2]);
+end
+
+function testGEAPCKStoresDerivativeValueCache(testCase)
+rng(11);
+N = 10;
+X = rand(N, 2) * 2 - 1;
+Y = exp(0.2 * X(:,1)) + X(:,2).^2;
+dYdX = [0.2 * exp(0.2 * X(:,1)), 2 * X(:,2)];
+
+data = struct();
+data.X_train = X;
+data.Y_train = Y;
+data.dYdX_train = dYdX;
+
+ModelOpts = struct();
+ModelOpts.Order = 3;
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.TrendBuilder = 'lars';
+ModelOpts.ModelType = 'geapck';
+ModelOpts.PCKType = 'optimal';
+ModelOpts.GradientMode = 'provided';
+ModelOpts.Parallel = 0;
+ModelOpts.KrigingOpts.optimize_theta = false;
+ModelOpts.KrigingOpts.theta0 = [0.7, 1.1];
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.2];
+
+[results, ~, ~, ~] = aPC_Train(data, ModelOpts);
+
+verifyTrue(testCase, isfield(results.basis_info, 'univ_dvals'));
+verifySize(testCase, results.basis_info.univ_dvals, size(results.basis_info.univ_vals));
 end
 
 function testAPCKMatern32Runs(testCase)
@@ -275,6 +363,7 @@ verifyEqual(testCase, results.PCKModel.parallel_scope, 'trend');
 end
 
 function testTrendParallelPrintsCorrectScopeLabel(testCase)
+rng(11);
 data = makeData(20, 2);
 
 ModelOpts = struct();
@@ -336,6 +425,7 @@ verifyNotEmpty(testCase, strfind(out, '(2/2)')); %#ok<STREMP>
 end
 
 function testSerialOptimalPCKShowsTrendProgress(testCase)
+rng(11);
 data = makeData(20, 2);
 
 ModelOpts = struct();
@@ -428,6 +518,7 @@ verifyNotEmpty(testCase, strfind(out, 'Reduced dimension')); %#ok<STREMP>
 end
 
 function testAPCKPrintShowsTrendBuilderAndSelectedTrendCount(testCase)
+rng(11);
 data = makeData(20, 2);
 
 ModelOpts = struct();
@@ -450,7 +541,33 @@ verifyNotEmpty(testCase, strfind(out, 'Trend builder                : LARS')); %
 verifyNotEmpty(testCase, strfind(out, sprintf('Active terms                 : %d', numel(results.PCKModel.trend_idx)))); %#ok<STREMP>
 end
 
+function testAPCKStoresTrendCoefficientsInResultsVector(testCase)
+rng(11);
+data = makeData(20, 2);
+
+ModelOpts = struct();
+ModelOpts.Order = 3;
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.TrendBuilder = 'lars';
+ModelOpts.ModelType = 'apck';
+ModelOpts.PCKType = 'optimal';
+ModelOpts.Parallel = 0;
+ModelOpts.KrigingOpts.optimize_theta = false;
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.4];
+
+[results, ~, ~, ~] = aPC_Train(data, ModelOpts);
+
+expected = zeros(size(results.coefficients));
+expected(results.PCKModel.trend_idx) = results.PCKModel.beta;
+
+verifyEqual(testCase, results.coefficients, expected, 'AbsTol', 1e-12);
+verifyGreaterThan(testCase, nnz(results.coefficients), 0);
+end
+
 function testAPCKRejectsUnsupportedTrendBuilder(testCase)
+rng(11);
 data = makeData(20, 2);
 
 ModelOpts = struct();

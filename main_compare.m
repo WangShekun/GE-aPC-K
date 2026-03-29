@@ -79,7 +79,7 @@ ModelOpts.KrigingOpts.DisplayProgress = true;% 是否显示 sequential/optimal �
 Benchmark.Name = 'ishigami';          % 'ishigami' | 'wingweight' | 'morris10'
 Benchmark.N_train = 200;
 Benchmark.N_val = 2000;
-Benchmark.GradientSource = 'finite-difference';  % 'analytic' | 'finite-difference' | 'auto'
+Benchmark.GradientSource = 'finite-difference';  % 'provided' | 'finite-difference' | 'auto'
 Benchmark.FDType = 'central';           % 'forward' | 'central'
 Benchmark.FDStep = 1e-6;                % 差分相对步长
 
@@ -276,6 +276,10 @@ function spec = get_benchmark_spec(name)
             spec.InputOpts = morris10_Input;
             spec.ModelFcn = @morris10;
             spec.GradFcn = @morris10_grad;
+
+        case 'dim100'
+            spec.InputOpts = dim100_Input;
+            spec.ModelFcn = @dim100;
 
         otherwise
             error('Unsupported benchmark: %s', name);
