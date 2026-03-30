@@ -60,37 +60,58 @@ function [A, ok] = localGetLinearMap(ReduceModel)
     ok = false;
     A = [];
 
-    if ~isfield(ReduceModel, 'params')
+    if ~isfield(ReduceModel, 'method') || isempty(ReduceModel.method) || ...
+            ~isfield(ReduceModel, 'params')
         return;
     end
 
+    method = lower(strtrim(ReduceModel.method));
     p = ReduceModel.params;
-    if isfield(p, 'V')
-        A = p.V;
-        ok = true;
+    if strcmp(method, 'pls')
+        if isfield(p, 'W')
+            A = p.W;
+            ok = true;
+        end
         return;
     end
-    if isfield(p, 'W') && isfield(ReduceModel, 'method') && ...
-            (strcmpi(ReduceModel.method, 'pls') || ...
-             strcmpi(ReduceModel.method, 'spca-primal') || ...
-             strcmpi(ReduceModel.method, 'spca-dual'))
-        A = p.W;
-        ok = true;
+
+    if strcmp(method, 'pca')
+        if isfield(p, 'V')
+            A = p.V;
+            ok = true;
+        end
         return;
     end
-    if isfield(p, 'R')
-        A = p.R;
-        ok = true;
+
+    if strcmp(method, 'spca-primal') || strcmp(method, 'spca-dual')
+        if isfield(p, 'W')
+            A = p.W;
+            ok = true;
+        end
         return;
     end
-    if isfield(p, 'Wwhite') && isfield(p, 'W')
-        A = p.Wwhite * p.W;
-        ok = true;
+
+    if strcmp(method, 'rp')
+        if isfield(p, 'R')
+            A = p.R;
+            ok = true;
+        end
         return;
     end
-    if isfield(p, 'Pwhite') && isfield(p, 'W')
-        A = p.Pwhite * p.W';
-        ok = true;
+
+    if strcmp(method, 'mcp')
+        if isfield(p, 'Wwhite') && isfield(p, 'W')
+            A = p.Wwhite * p.W;
+            ok = true;
+        end
+        return;
+    end
+
+    if strcmp(method, 'ica')
+        if isfield(p, 'Pwhite') && isfield(p, 'W')
+            A = p.Pwhite * p.W';
+            ok = true;
+        end
         return;
     end
 end

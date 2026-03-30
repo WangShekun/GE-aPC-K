@@ -16,13 +16,13 @@ ModelOpts.RegressionMethod = 'lars';    % APC trend 的回归器：通常用 'la
 ModelOpts.TrendBuilder = 'lars';
 % === 模型选择设置 ===
 ModelOpts.ModelType = 'apck';           % 模型类型：'apc' | 'apck' | 'geapck'
-ModelOpts.PCKType = 'sequential';          % PCK 策略：'sequential' | 'optimal'
+ModelOpts.PCKType = 'optimal';          % PCK 策略：'sequential' | 'optimal'
 % ModelOpts.GradientMode = 'provided';  % GEAPCK 梯度来源：'provided' | 'finite-difference' | 'auto'
 ModelOpts.Parallel = 0;                 % 是否并行搜索候选配置：0/1
 
 % === 降维设置 ===
 % ModelOpts.ReductionMethod = 'pls';    % 降维方法：'pls' | 'pca' | 'kpca' | 'mcp' | 'ica' | 'rp' | ...
-% ModelOpts.red_dim = [2];              % 降维后的目标维数；可设为标量或搜索向量
+% ModelOpts.red_dim = [8];              % 降维后的目标维数；可设为标量或搜索向量
 
 % === KPCA / SKPCA 输入核设置 ===
 % ModelOpts.kernel_type = {'gaussian'}; % 输入核类型
