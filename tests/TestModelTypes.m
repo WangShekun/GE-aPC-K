@@ -578,6 +578,27 @@ verifySize(testCase, dataOut.dY_model, [N, 2]);
 verifySize(testCase, Yhat, [N, 1]);
 end
 
+function testPrepareModelGradientsRejectsUnknownReductionMethod(testCase)
+data = struct();
+data.X_train = [1 2 3; 4 5 6];
+data.dYdX_train = [0.1 0.2 0.3; 0.4 0.5 0.6];
+
+map_U = struct();
+map_U.nonConstIdx = [true true true];
+map_U.sigma = [2 3 4];
+
+ReduceModel = struct();
+ReduceModel.method = 'mystery-linear-map';
+ReduceModel.params = struct('V', eye(3, 2));
+ReduceModel.sigma2 = [5 7];
+
+ModelOpts = struct();
+ModelOpts.GradientMode = 'provided';
+
+verifyError(testCase, @() aPC_PrepareModelGradients(data, map_U, ReduceModel, ModelOpts), ...
+    'aPC:UnsupportedGEReduction');
+end
+
 function testSearchFieldsDoNotIncludeTheta0(testCase)
 fields = aPC_list_search_fields();
 verifyFalse(testCase, any(strcmp(fields, 'KrigingOpts.theta0')));
