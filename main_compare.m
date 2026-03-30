@@ -9,7 +9,7 @@ uqlab
 ModelOpts = struct();
 
 % === 基础多项式设置 ===
-ModelOpts.Order = [4];                  % 多项式总阶数 p；可设为标量或搜索向量
+ModelOpts.Order = [5];                  % 多项式总阶数 p；可设为标量或搜索向量
 ModelOpts.qnorm = [0.8];                % q-norm 截断参数；越小越稀疏
 ModelOpts.aPC_Method = 'stieltjes';     % 一维 aPC 构造方法：'2012' | '2018' | 'stieltjes'
 ModelOpts.RegressionMethod = 'lars';    % APC trend 的回归器：通常用 'lars'
@@ -77,7 +77,7 @@ ModelOpts.KrigingOpts.use_objective_gradient = 0;
 % ModelOpts.FDOpts.step = 1e-6;               % 相对步长，用于自动数值梯度
 
 % === 基准函数选择（含梯度） ===
-Benchmark.Name = 'morris10';          % 'ishigami' | 'wingweight' | 'morris10'
+Benchmark.Name = 'ishigami';          % 'ishigami' | 'wingweight' | 'morris10'
 Benchmark.N_train = 200;
 Benchmark.N_val = 2000;
 Benchmark.GradientSource = 'finite-difference';  % 'provided' | 'finite-difference' | 'auto'

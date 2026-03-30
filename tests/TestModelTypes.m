@@ -410,6 +410,46 @@ verifyGreaterThan(testCase, results.PCKModel.theta_opt_output.funcCount, 0);
 verifyTrue(testCase, isfinite(results.PCKModel.loo));
 end
 
+function testGEAPCKGaussianBuildsGradientSlicesOnDemand(testCase)
+rng(11);
+N = 10;
+X = rand(N, 2) * 2 - 1;
+Y = exp(0.2 * X(:,1)) + X(:,2).^2;
+dYdX = [0.2 * exp(0.2 * X(:,1)), 2 * X(:,2)];
+
+data = struct();
+data.X_train = X;
+data.Y_train = Y;
+data.dYdX_train = dYdX;
+
+ModelOpts = struct();
+ModelOpts.Order = 3;
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.ModelType = 'geapck';
+ModelOpts.PCKType = 'optimal';
+ModelOpts.GradientMode = 'provided';
+ModelOpts.Parallel = 0;
+ModelOpts.KrigingOpts.corr = 'gaussian';
+ModelOpts.KrigingOpts.optimize_theta = true;
+ModelOpts.KrigingOpts.use_objective_gradient = true;
+ModelOpts.KrigingOpts.theta0 = [0.7, 1.1];
+ModelOpts.KrigingOpts.theta_lb = 1e-2;
+ModelOpts.KrigingOpts.theta_ub = 10;
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.2];
+
+profile clear;
+profile on;
+[~, ~, ~, ~] = aPC_Train(data, ModelOpts);
+p = profile('info');
+profile off;
+
+names = {p.FunctionTable.FunctionName};
+verifyFalse(testCase, any(strcmp(names, 'aPC_PCKBackend>localGEGaussianThetaDerivatives')));
+verifyTrue(testCase, any(strcmp(names, 'aPC_PCKBackend>localGEGaussianThetaDerivativeSlice')));
+end
+
 function testGEAPCKMatern32SkipsObjectiveGradient(testCase)
 rng(11);
 N = 12;

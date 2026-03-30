@@ -260,9 +260,9 @@ function [nll, grad_z] = localNLLWithGradient(z, F, dF, Y, U, G, KrigingOpts, us
     grad_theta = zeros(1, numel(theta));
 
     if use_ge
-        dK = localGEGaussianThetaDerivatives(U, theta);
+        ge_ctx = localGEGaussianThetaDerivativeContext(U, theta);
         for i = 1:numel(theta)
-            dKi = dK(:, :, i);
+            dKi = localGEGaussianThetaDerivativeSlice(ge_ctx, i);
             trace_term = sum(sum(Kinv .* dKi));
             quad_term = core.alpha' * dKi * core.alpha;
             grad_theta(i) = trace_term - quad_term / core.sigma2;
@@ -412,55 +412,61 @@ function tf = localSupportsObjectiveGradient(use_ge, corr_type)
     tf = strcmpi(corr_type, 'gaussian');
 end
 
-function dK = localGEGaussianThetaDerivatives(U, theta)
+function ctx = localGEGaussianThetaDerivativeContext(U, theta)
     N = size(U, 1);
     d = size(U, 2);
-    nobs = N * (d + 1);
     delta = reshape(U, N, 1, []) - reshape(U, 1, N, []);
     theta = theta(:)';
-    theta2 = theta.^2;
-    theta3 = theta.^3;
     q = sum((delta ./ reshape(theta, 1, 1, [])).^2, 3);
-    Kff = exp(-0.5 * q);
 
-    dK = zeros(nobs, nobs, d);
-    for i = 1:d
-        dKff_i = Kff .* (delta(:, :, i).^2 / theta3(i));
-        dK(1:N, 1:N, i) = dKff_i;
+    ctx = struct();
+    ctx.N = N;
+    ctx.d = d;
+    ctx.nobs = N * (d + 1);
+    ctx.delta = delta;
+    ctx.theta2 = theta.^2;
+    ctx.theta3 = theta.^3;
+    ctx.Kff = exp(-0.5 * q);
+end
 
-        for a = 1:d
-            rows = N + (a - 1) * N + (1:N);
-            base_a = delta(:, :, a) / theta2(a);
-            dKfg = base_a .* dKff_i;
+function dKi = localGEGaussianThetaDerivativeSlice(ctx, i)
+    N = ctx.N;
+    d = ctx.d;
+    dKi = zeros(ctx.nobs, ctx.nobs);
+    dKff_i = ctx.Kff .* (ctx.delta(:, :, i).^2 / ctx.theta3(i));
+    dKi(1:N, 1:N) = dKff_i;
+
+    for a = 1:d
+        rows = N + (a - 1) * N + (1:N);
+        base_a = ctx.delta(:, :, a) / ctx.theta2(a);
+        dKfg = base_a .* dKff_i;
+        if i == a
+            dKfg = dKfg - 2 * ctx.Kff .* (ctx.delta(:, :, a) / ctx.theta3(a));
+        end
+        dKi(1:N, rows) = dKfg;
+        dKi(rows, 1:N) = -dKfg;
+
+        for b = 1:d
+            cols = N + (b - 1) * N + (1:N);
+            S = -(ctx.delta(:, :, a) .* ctx.delta(:, :, b)) / (ctx.theta2(a) * ctx.theta2(b));
+            if a == b
+                S = S + 1 / ctx.theta2(a);
+            end
+
+            dS = zeros(N, N);
             if i == a
-                dKfg = dKfg - 2 * Kff .* (delta(:, :, a) / theta3(a));
-            end
-            dK(1:N, rows, i) = dKfg;
-            dK(rows, 1:N, i) = -dKfg;
-
-            for b = 1:d
-                cols = N + (b - 1) * N + (1:N);
-                S = -(delta(:, :, a) .* delta(:, :, b)) / (theta2(a) * theta2(b));
+                dS = dS + 2 * (ctx.delta(:, :, a) .* ctx.delta(:, :, b)) / (ctx.theta3(a) * ctx.theta2(b));
                 if a == b
-                    S = S + 1 / theta2(a);
+                    dS = dS - 2 / ctx.theta3(a);
                 end
-
-                dS = zeros(N, N);
-                if i == a
-                    dS = dS + 2 * (delta(:, :, a) .* delta(:, :, b)) / (theta3(a) * theta2(b));
-                    if a == b
-                        dS = dS - 2 / theta3(a);
-                    end
-                end
-                if i == b
-                    dS = dS + 2 * (delta(:, :, a) .* delta(:, :, b)) / (theta2(a) * theta3(b));
-                end
-
-                dK(rows, cols, i) = dS .* Kff + S .* dKff_i;
             end
+            if i == b
+                dS = dS + 2 * (ctx.delta(:, :, a) .* ctx.delta(:, :, b)) / (ctx.theta2(a) * ctx.theta3(b));
+            end
+
+            dKi(rows, cols) = dS .* ctx.Kff + S .* dKff_i;
         end
     end
-
 end
 
 function S = localSetDef(S, field, val)
