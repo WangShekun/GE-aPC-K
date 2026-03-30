@@ -16,7 +16,7 @@ ModelOpts.RegressionMethod = 'lars';    % APC trend 的回归器：通常用 'la
 ModelOpts.TrendBuilder = 'lars';
 % === 模型选择设置 ===
 ModelOpts.ModelType = 'apck';           % 模型类型：'apc' | 'apck' | 'geapck'
-ModelOpts.PCKType = 'optimal';          % PCK 策略：'sequential' | 'optimal'
+ModelOpts.PCKType = 'sequential';          % PCK 策略：'sequential' | 'optimal'
 % ModelOpts.GradientMode = 'provided';  % GEAPCK 梯度来源：'provided' | 'finite-difference' | 'auto'
 ModelOpts.Parallel = 0;                 % 是否并行搜索候选配置：0/1
 
@@ -70,6 +70,7 @@ ModelOpts.KrigingOpts.trend_range = [0.8]; % trend 路径比例区间
 % ModelOpts.KrigingOpts.early_stop_patience = 3;
 ModelOpts.KrigingOpts.optimize_theta = true;  % 是否优化 Kriging 长度尺度
 ModelOpts.KrigingOpts.DisplayProgress = true;% 是否显示 sequential/optimal 的内部进度
+ModelOpts.KrigingOpts.use_objective_gradient = 0;
 
 % === GE 数值梯度回退设置 ===
 % ModelOpts.FDOpts.type = 'forward';          % 差分类型：'forward' | 'central'
@@ -111,7 +112,7 @@ end
 data.X_val = uq_getSample(myInput, Benchmark.N_val);
 data.Y_val = benchSpec.ModelFcn(data.X_val);
 
-model_list = {'uqlab_pce', 'apc', 'apck', 'geapck'};
+model_list = {'uqlab_pce','apc','apck','geapck'};
 rows = numel(model_list);
 
 bench = repmat(struct( ...
