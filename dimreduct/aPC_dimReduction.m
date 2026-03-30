@@ -82,6 +82,26 @@ function [data, ModelOpts, ReduceModel] = aPC_dimReduction(data, ModelOpts)
         case 'rp'
             [X_red, ReduceModel] = aPC_dimReduction_rp(U, ModelOpts);
 
+        case 'ge_pls'
+            if isempty(Y), error('GE-PLS 降维需要 data.Y_train。'); end
+            if ~isfield(data, 'dYdU_train') || isempty(data.dYdU_train)
+                error('aPC:ReductionGradientRequired', 'ge_pls requires precomputed gradients.');
+            end
+            [X_red, ReduceModel] = aPC_dimReduction_ge_pls(U, Y, data.dYdU_train, ModelOpts.red_dim, ModelOpts);
+
+        case 'as_pls'
+            if isempty(Y), error('AS-PLS 降维需要 data.Y_train。'); end
+            if ~isfield(data, 'dYdU_train') || isempty(data.dYdU_train)
+                error('aPC:ReductionGradientRequired', 'as_pls requires precomputed gradients.');
+            end
+            [X_red, ReduceModel] = aPC_dimReduction_as_pls(U, Y, data.dYdU_train, ModelOpts.red_dim, ModelOpts);
+
+        case 'as'
+            if ~isfield(data, 'dYdU_train') || isempty(data.dYdU_train)
+                error('aPC:ReductionGradientRequired', 'as requires precomputed gradients.');
+            end
+            [X_red, ReduceModel] = aPC_dimReduction_as(U, data.dYdU_train, ModelOpts.red_dim, ModelOpts);
+
         otherwise
             error('Unknown ReductionMethod: %s', ModelOpts.ReductionMethod);
     end
