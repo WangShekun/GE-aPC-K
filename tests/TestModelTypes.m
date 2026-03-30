@@ -132,6 +132,100 @@ verifyTrue(testCase, isfinite(results.PCKModel.loo));
 verifyTrue(testCase, isfinite(results.PCKModel.normEmpErr));
 end
 
+function testAPCKThetaOptimizationReportsObjectiveGradientUsage(testCase)
+rng(11);
+data = makeData(22, 2);
+
+ModelOpts = struct();
+ModelOpts.Order = 3;
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.ModelType = 'apck';
+ModelOpts.PCKType = 'optimal';
+ModelOpts.Parallel = 0;
+ModelOpts.KrigingOpts.optimize_theta = true;
+ModelOpts.KrigingOpts.use_objective_gradient = true;
+ModelOpts.KrigingOpts.theta0 = 0.3;
+ModelOpts.KrigingOpts.theta_lb = 1e-3;
+ModelOpts.KrigingOpts.theta_ub = 10;
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.4];
+
+[results, ~, ~, ~] = aPC_Train(data, ModelOpts);
+
+verifyTrue(testCase, results.PCKModel.theta_uses_objective_gradient);
+verifyTrue(testCase, isfield(results.PCKModel, 'theta_opt_output'));
+verifyGreaterThan(testCase, results.PCKModel.theta_opt_output.funcCount, 0);
+end
+
+function testAPCKThetaObjectiveGradientKeepsFiniteDiagnostics(testCase)
+rng(11);
+data = makeData(22, 2);
+
+ModelOpts = struct();
+ModelOpts.Order = 3;
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.ModelType = 'apck';
+ModelOpts.PCKType = 'optimal';
+ModelOpts.Parallel = 0;
+ModelOpts.KrigingOpts.optimize_theta = true;
+ModelOpts.KrigingOpts.use_objective_gradient = true;
+ModelOpts.KrigingOpts.theta0 = 0.5;
+ModelOpts.KrigingOpts.theta_lb = 1e-2;
+ModelOpts.KrigingOpts.theta_ub = 10;
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.4];
+
+[results, ~, ~, ~] = aPC_Train(data, ModelOpts);
+
+verifyTrue(testCase, isfinite(results.LOO));
+verifyTrue(testCase, isfinite(results.normEmpErr));
+verifyTrue(testCase, all(isfinite(results.PCKModel.theta)));
+verifyTrue(testCase, isfinite(results.PCKModel.loo));
+verifyTrue(testCase, isfinite(results.PCKModel.normEmpErr));
+verifyGreaterThanOrEqual(testCase, min(results.PCKModel.theta), ModelOpts.KrigingOpts.theta_lb);
+verifyLessThanOrEqual(testCase, max(results.PCKModel.theta), ModelOpts.KrigingOpts.theta_ub);
+end
+
+function testAPCKThetaCoreBatchesLinearSolves(testCase)
+rng(11);
+data = makeData(18, 2);
+
+ModelOpts = struct();
+ModelOpts.Order = 3;
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.ModelType = 'apck';
+ModelOpts.PCKType = 'optimal';
+ModelOpts.Parallel = 0;
+ModelOpts.KrigingOpts.optimize_theta = true;
+ModelOpts.KrigingOpts.theta0 = 0.5;
+ModelOpts.KrigingOpts.theta_lb = 1e-2;
+ModelOpts.KrigingOpts.theta_ub = 10;
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.2];
+
+profile clear;
+profile on;
+[~, ~, ~, ~] = aPC_Train(data, ModelOpts);
+p = profile('info');
+profile off;
+
+idx = find(strcmp({p.FunctionTable.FunctionName}, 'aPC_PCKBackend>localEvalThetaCore'), 1);
+verifyNotEmpty(testCase, idx);
+
+lines = p.FunctionTable(idx).ExecutedLines(:, 1);
+merged_line = localFindSourceLine('coefficients/aPC_PCKBackend.m', 'KinvHY = L'' \ (L \ [H, y_aug]);');
+alpha_line = localFindSourceLine('coefficients/aPC_PCKBackend.m', 'alpha = L'' \ (L \ residual);');
+
+verifyNotEmpty(testCase, merged_line);
+verifyTrue(testCase, any(lines == merged_line));
+if ~isempty(alpha_line)
+    verifyFalse(testCase, any(lines == alpha_line));
+end
+end
+
 function testAPCKCholeskyFailureDoesNotLookLikePerfectLOO(testCase)
 X = [0 0; 0 0; 0.5 -0.2; -0.5 0.3];
 Y = sin(X(:,1)) + X(:,2).^2;
@@ -226,6 +320,27 @@ verifyLessThan(testCase, max(abs(Yhat - Y)), 3e-2);
 verifySize(testCase, dataOut.dYdX_train, [N, 2]);
 end
 
+function testPckBuildAugmentedSystemAvoidsCell2mat(testCase)
+U = [0.1 -0.3; -0.2 0.4; 0.5 0.2];
+Y = [1.0; 0.7; -0.4];
+G = [0.3 -0.1; 0.2 0.4; -0.5 0.6];
+F = [ones(3, 1), U(:, 1)];
+dF = [zeros(3, 1), ones(3, 1); zeros(3, 1), zeros(3, 1)];
+theta = [0.8 1.1];
+
+profile clear;
+profile on;
+[K, y_aug, H] = pckBuildAugmentedSystem(U, Y, G, F, dF, theta, 'gaussian', 1e-8); %#ok<ASGLU>
+p = profile('info');
+profile off;
+
+names = {p.FunctionTable.FunctionName};
+verifyFalse(testCase, any(strcmp(names, 'cell2mat')));
+verifySize(testCase, K, [9, 9]);
+verifySize(testCase, y_aug, [9, 1]);
+verifySize(testCase, H, [9, 2]);
+end
+
 function testGEAPCKStoresDerivativeValueCache(testCase)
 rng(11);
 N = 10;
@@ -256,6 +371,80 @@ ModelOpts.KrigingOpts.trend_range = [0.2, 0.2];
 
 verifyTrue(testCase, isfield(results.basis_info, 'univ_dvals'));
 verifySize(testCase, results.basis_info.univ_dvals, size(results.basis_info.univ_vals));
+end
+
+function testGEAPCKGaussianUsesObjectiveGradient(testCase)
+rng(11);
+N = 12;
+X = rand(N, 2) * 2 - 1;
+Y = exp(0.2 * X(:,1)) + X(:,2).^2;
+dYdX = [0.2 * exp(0.2 * X(:,1)), 2 * X(:,2)];
+
+data = struct();
+data.X_train = X;
+data.Y_train = Y;
+data.dYdX_train = dYdX;
+
+ModelOpts = struct();
+ModelOpts.Order = 3;
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.ModelType = 'geapck';
+ModelOpts.PCKType = 'optimal';
+ModelOpts.GradientMode = 'provided';
+ModelOpts.Parallel = 0;
+ModelOpts.KrigingOpts.corr = 'gaussian';
+ModelOpts.KrigingOpts.optimize_theta = true;
+ModelOpts.KrigingOpts.use_objective_gradient = true;
+ModelOpts.KrigingOpts.theta0 = [0.7, 1.1];
+ModelOpts.KrigingOpts.theta_lb = 1e-2;
+ModelOpts.KrigingOpts.theta_ub = 10;
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.2];
+
+[results, ~, ~, ~] = aPC_Train(data, ModelOpts);
+
+verifyTrue(testCase, results.PCKModel.theta_uses_objective_gradient);
+verifyTrue(testCase, isfield(results.PCKModel, 'theta_opt_output'));
+verifyGreaterThan(testCase, results.PCKModel.theta_opt_output.funcCount, 0);
+verifyTrue(testCase, isfinite(results.PCKModel.loo));
+end
+
+function testGEAPCKMatern32SkipsObjectiveGradient(testCase)
+rng(11);
+N = 12;
+X = rand(N, 2) * 2 - 1;
+Y = exp(0.2 * X(:,1)) + X(:,2).^2;
+dYdX = [0.2 * exp(0.2 * X(:,1)), 2 * X(:,2)];
+
+data = struct();
+data.X_train = X;
+data.Y_train = Y;
+data.dYdX_train = dYdX;
+
+ModelOpts = struct();
+ModelOpts.Order = 3;
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.ModelType = 'geapck';
+ModelOpts.PCKType = 'optimal';
+ModelOpts.GradientMode = 'provided';
+ModelOpts.Parallel = 0;
+ModelOpts.KrigingOpts.corr = 'matern32';
+ModelOpts.KrigingOpts.optimize_theta = true;
+ModelOpts.KrigingOpts.use_objective_gradient = true;
+ModelOpts.KrigingOpts.theta0 = [0.7, 1.1];
+ModelOpts.KrigingOpts.theta_lb = 1e-2;
+ModelOpts.KrigingOpts.theta_ub = 10;
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.2];
+
+[results, ~, ~, ~] = aPC_Train(data, ModelOpts);
+
+verifyFalse(testCase, results.PCKModel.theta_uses_objective_gradient);
+verifyTrue(testCase, isfield(results.PCKModel, 'theta_opt_output'));
+verifyGreaterThan(testCase, results.PCKModel.theta_opt_output.funcCount, 0);
+verifyTrue(testCase, isfinite(results.PCKModel.loo));
 end
 
 function testAPCKMatern32Runs(testCase)
@@ -682,4 +871,11 @@ end
 data = struct();
 data.X_train = rand(20, 2);
 data.Y_train = rand(20, 1);
+end
+
+function line_num = localFindSourceLine(rel_path, needle)
+repo_root = fileparts(fileparts(mfilename('fullpath')));
+txt = fileread(fullfile(repo_root, rel_path));
+parts = regexp(txt, '\r\n|\n|\r', 'split');
+line_num = find(cellfun(@(s) contains(s, needle), parts), 1);
 end

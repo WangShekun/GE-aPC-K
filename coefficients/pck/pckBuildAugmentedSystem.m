@@ -9,11 +9,21 @@ function [K, y_aug, H] = pckBuildAugmentedSystem(U, Y, G, F, dF, theta, corr_typ
             'GEAPCK does not support %s correlation because the kernel is not differentiable at zero.', corr_type);
     end
 
-    Kfg = cat(2, Kfg_blocks{:});
-    Kgf = -cat(1, Kfg_blocks{:});
-    Kgg = cell2mat(Kgg_blocks);
+    nobs = N * (d + 1);
+    K = zeros(nobs, nobs);
+    K(1:N, 1:N) = Kff;
 
-    K = [Kff, Kfg; Kgf, Kgg] + nugget * eye(N * (d + 1));
+    for a = 1:d
+        rows = N + (a - 1) * N + (1:N);
+        K(1:N, rows) = Kfg_blocks{a};
+        K(rows, 1:N) = -Kfg_blocks{a};
+        for b = 1:d
+            cols = N + (b - 1) * N + (1:N);
+            K(rows, cols) = Kgg_blocks{a, b};
+        end
+    end
+
+    K(1:nobs + 1:end) = K(1:nobs + 1:end) + nugget;
     y_aug = [Y; reshape(G, N * d, 1)];
     H = [F; dF];
 end

@@ -9,14 +9,14 @@ uqlab
 ModelOpts = struct();
 
 % === 基础多项式设置 ===
-ModelOpts.Order = [5];                  % 多项式总阶数 p；可设为标量或搜索向量
+ModelOpts.Order = [4];                  % 多项式总阶数 p；可设为标量或搜索向量
 ModelOpts.qnorm = [0.8];                % q-norm 截断参数；越小越稀疏
 ModelOpts.aPC_Method = 'stieltjes';     % 一维 aPC 构造方法：'2012' | '2018' | 'stieltjes'
 ModelOpts.RegressionMethod = 'lars';    % APC trend 的回归器：通常用 'lars'
 ModelOpts.TrendBuilder = 'lars';
 % === 模型选择设置 ===
 ModelOpts.ModelType = 'apck';           % 模型类型：'apc' | 'apck' | 'geapck'
-ModelOpts.PCKType = 'optimal';          % PCK 策略：'sequential' | 'optimal'
+ModelOpts.PCKType = 'sequential';          % PCK 策略：'sequential' | 'optimal'
 % ModelOpts.GradientMode = 'provided';  % GEAPCK 梯度来源：'provided' | 'finite-difference' | 'auto'
 ModelOpts.Parallel = 0;                 % 是否并行搜索候选配置：0/1
 
@@ -70,13 +70,14 @@ ModelOpts.KrigingOpts.trend_range = [0.8]; % trend 路径比例区间
 % ModelOpts.KrigingOpts.early_stop_patience = 3;
 ModelOpts.KrigingOpts.optimize_theta = true;  % 是否优化 Kriging 长度尺度
 ModelOpts.KrigingOpts.DisplayProgress = true;% 是否显示 sequential/optimal 的内部进度
+ModelOpts.KrigingOpts.use_objective_gradient = 0;
 
 % === GE 数值梯度回退设置 ===
 % ModelOpts.FDOpts.type = 'forward';          % 差分类型：'forward' | 'central'
 % ModelOpts.FDOpts.step = 1e-6;               % 相对步长，用于自动数值梯度
 
 % === 基准函数选择（含梯度） ===
-Benchmark.Name = 'ishigami';          % 'ishigami' | 'wingweight' | 'morris10'
+Benchmark.Name = 'morris10';          % 'ishigami' | 'wingweight' | 'morris10'
 Benchmark.N_train = 200;
 Benchmark.N_val = 2000;
 Benchmark.GradientSource = 'finite-difference';  % 'provided' | 'finite-difference' | 'auto'
@@ -111,7 +112,7 @@ end
 data.X_val = uq_getSample(myInput, Benchmark.N_val);
 data.Y_val = benchSpec.ModelFcn(data.X_val);
 
-model_list = {'uqlab_pce', 'apc', 'apck', 'geapck'};
+model_list = {'uqlab_pce','apc','apck','geapck'};
 rows = numel(model_list);
 
 bench = repmat(struct( ...
