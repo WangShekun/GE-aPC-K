@@ -1,4 +1,4 @@
-function [X_red, ReduceModel] = aPC_dimReduction_as(U, dYdU, ncomp, ModelOpts)
+function [X_red, ReduceModel] = aPC_dimReduction_as(U, dYdU, ncomp)
 % Active Subspace reduction using gradient covariance only.
 
     if isempty(dYdU)
@@ -26,12 +26,4 @@ function [X_red, ReduceModel] = aPC_dimReduction_as(U, dYdU, ncomp, ModelOpts)
     ReduceModel.method = 'as';
     ReduceModel.params = params;
     ReduceModel.transform = @(U_new) U_new * params.A;
-
-    info = struct();
-    info.C = C;
-    info.eigvals = eigvals;
-    if nargin >= 4
-        info.ModelOpts = ModelOpts;
-    end
-    ReduceModel.info = info;
 end

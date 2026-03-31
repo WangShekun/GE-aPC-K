@@ -56,7 +56,7 @@ function [A, ok] = localGetLinearMap(ReduceModel)
         return;
     end
 
-    if strcmp(method, 'spca-primal') || strcmp(method, 'spca-dual')
+    if strcmp(method, 'spca_hsic')
         if isfield(p, 'W')
             A = p.W;
             ok = true;
@@ -105,6 +105,22 @@ function [A, ok] = localGetLinearMap(ReduceModel)
     end
 
     if strcmp(method, 'as')
+        if isfield(p, 'A')
+            A = p.A;
+            ok = true;
+        end
+        return;
+    end
+
+    if strcmp(method, 'sas')
+        if isfield(p, 'W')
+            A = p.W;
+            ok = true;
+        end
+        return;
+    end
+
+    if strcmp(method, 'sgs')
         if isfield(p, 'A')
             A = p.A;
             ok = true;

@@ -1,14 +1,20 @@
 function [X_red, ReduceModel] = aPC_dimReduction_as_pls(U, Y, dYdU, ncomp, ModelOpts)
 % Active-subspace-plus-PLS reduction using gradient covariance first and PLS second.
+% Method options are read from ModelOpts.as_pls_opts (recommended).
 
     if isempty(dYdU)
         error('aPC:ReductionGradientRequired', 'as_pls requires gradients in U-space.');
     end
 
+    opts = struct();
+    if nargin >= 5 && isfield(ModelOpts, 'as_pls_opts') && ~isempty(ModelOpts.as_pls_opts)
+        opts = ModelOpts.as_pls_opts;
+    end
+
     [~, M] = size(U);
     as_dim = min(M, max(ncomp, 2 * ncomp));
-    if nargin >= 5 && isfield(ModelOpts, 'as_dim') && ~isempty(ModelOpts.as_dim)
-        as_dim = ModelOpts.as_dim;
+    if isfield(opts, 'as_dim') && ~isempty(opts.as_dim)
+        as_dim = opts.as_dim;
     end
     if as_dim < ncomp
         error('aPC:InvalidASDim', 'as_dim must be at least red_dim for as_pls.');

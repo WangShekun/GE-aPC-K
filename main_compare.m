@@ -21,18 +21,24 @@ ModelOpts.PCKType = 'sequential';          % PCK 策略：'sequential' | 'optima
 ModelOpts.Parallel = 0;                 % 是否并行搜索候选配置：0/1
 
 % === 降维设置 ===
-ModelOpts.ReductionMethod = 'as_pls';    % 降维方法：'pls' | 'pca' | 'kpca' | 'mcp' | 'ica' | 'rp' | ...
-ModelOpts.red_dim = [10];              % 降维后的目标维数；可设为标量或搜索向量
+ModelOpts.ReductionMethod = 'sgs';    % 降维方法：'pls' | 'pca' | 'kpca' | 'mcp' | 'ica' | 'rp' | ...
+ModelOpts.red_dim = [15];              % 降维后的目标维数；可设为标量或搜索向量
 
 % === KPCA / SKPCA 输入核设置 ===
-% ModelOpts.kernel_type = {'gaussian'}; % 输入核类型
-% ModelOpts.kernel_gamma = [0.1];       % 高斯/拉普拉斯等核的尺度参数
-% ModelOpts.kernel_degree = [2];        % 多项式核次数
-% ModelOpts.kernel_offset = [1];        % 多项式核偏置项
+% ModelOpts.kpca_opts.kernel_type = {'gaussian'};  % KPCA 输入核类型
+% ModelOpts.kpca_opts.kernel_gamma = [0.1];        % KPCA 输入核尺度参数
+% ModelOpts.kpca_opts.kernel_degree = [2];         % KPCA 输入核次数
+% ModelOpts.kpca_opts.kernel_offset = [1];         % KPCA 输入核偏置项
+% ModelOpts.skpca_opts.kernel_type = {'gaussian'}; % SKPCA 输入核类型
+% ModelOpts.skpca_opts.kernel_gamma = [0.1];       % SKPCA 输入核尺度参数
+% ModelOpts.skpca_opts.kernel_degree = [2];        % SKPCA 输入核次数
+% ModelOpts.skpca_opts.kernel_offset = [1];        % SKPCA 输入核偏置项
 
 % === SKPCA 标签核设置 ===
-% ModelOpts.label_kernel_type = {'gaussian'}; % 标签核类型
-% ModelOpts.label_kernel_gamma = [1/128^2];   % 标签核尺度参数
+% ModelOpts.skpca_opts.label_kernel_type = {'gaussian'}; % 标签核类型
+% ModelOpts.skpca_opts.label_kernel_gamma = [1/128^2];   % 标签核尺度参数
+% ModelOpts.skpca_opts.label_kernel_degree = [2];        % 标签核次数
+% ModelOpts.skpca_opts.label_kernel_offset = [1];        % 标签核偏置项
 
 % === MCP 设置 ===
 % ModelOpts.mcp_opts.maxIter = 3000;          % MCP 最大迭代次数
@@ -46,19 +52,38 @@ ModelOpts.red_dim = [10];              % 降维后的目标维数；可设为标
 % ModelOpts.mcp_opts.manopt_solver = 'rlbfgs';% MCP 优化器
 
 % === ICA 设置 ===
-% ModelOpts.ica_approach = 'symm';            % ICA 求解方式：'symm' | 'defl'
-% ModelOpts.ica_fun = 'tanh';                 % 非线性函数：'tanh' | 'gauss' | 'pow3'
-% ModelOpts.ica_a1 = 1.0;                     % tanh 非线性尺度参数
-% ModelOpts.ica_epsilon = 1e-4;               % 收敛阈值
-% ModelOpts.ica_maxIter = 200;                % 最大迭代次数
-% ModelOpts.ica_mu = 1.0;                     % 阻尼/步长参数
-% ModelOpts.ica_stabilization = 'on';         % 是否启用稳定化
-% ModelOpts.ica_whiten_solver = 'svd';        % 白化求解器：'svd' | 'eig'
-% ModelOpts.ica_verbose = 0;                  % ICA 过程是否输出信息
+% ModelOpts.ica_opts.approach = 'symm';       % ICA 求解方式：'symm' | 'defl'
+% ModelOpts.ica_opts.fun = 'tanh';            % 非线性函数：'tanh' | 'gauss' | 'pow3'
+% ModelOpts.ica_opts.a1 = 1.0;                % tanh 非线性尺度参数
+% ModelOpts.ica_opts.epsilon = 1e-4;          % 收敛阈值
+% ModelOpts.ica_opts.maxIter = 200;           % 最大迭代次数
+% ModelOpts.ica_opts.mu = 1.0;                % 阻尼/步长参数
+% ModelOpts.ica_opts.stabilization = 'on';    % 是否启用稳定化
+% ModelOpts.ica_opts.whiten_solver = 'svd';   % 白化求解器：'svd' | 'eig'
+% ModelOpts.ica_opts.verbose = 0;             % ICA 过程是否输出信息
 
 % === 随机投影设置 ===
-% ModelOpts.rp_type = 'gaussian';             % 随机投影矩阵类型：'gaussian' | 'rademacher'
-% ModelOpts.rp_scale = 'jl';                  % 是否做 Johnson-Lindenstrauss 缩放：'jl' | 'none'
+% ModelOpts.rp_opts.type = 'gaussian';        % 随机投影矩阵类型：'gaussian' | 'rademacher'
+% ModelOpts.rp_opts.scale = 'jl';             % 是否做 Johnson-Lindenstrauss 缩放：'jl' | 'none'
+% ModelOpts.rp_opts.seed = 80;                % 随机种子
+
+% === 监督式as设置===
+% ModelOpts.sas_opts.alpha = 1;
+% ModelOpts.sas_opts.beta = 0.5;
+% ModelOpts.sas_opts.normalize_terms = true;
+
+% === as_pls设置===
+ModelOpts.as_pls_opts.as_dim = 40;
+
+% === ge_pls设置===
+% ModelOpts.ge_pls_opts.grad_weight = 1.0;
+
+% === sgs设置===
+% ModelOpts.sgs_opts.alpha = 0.2;
+% ModelOpts.sgs_opts.bandwidth = [];
+% ModelOpts.sgs_opts.eps_reg = 1e-12;
+% ModelOpts.sgs_opts.normalize = true;
+% ModelOpts.sgs_opts.centerU = false;
 
 % === APCK / GEAPCK Kriging 设置 ===
 ModelOpts.KrigingOpts.corr = 'gaussian';      % 相关函数类型：'gaussian' | 'exponential' | 'matern32'

@@ -1,14 +1,18 @@
 function [X_red, ReduceModel] = aPC_dimReduction_ge_pls(U, Y, dYdU, ncomp, ModelOpts)
 % Gradient-enhanced PLS reduction using an augmented response matrix.
+% Method options are read from ModelOpts.ge_pls_opts (recommended).
 
     if isempty(dYdU)
         error('aPC:ReductionGradientRequired', 'ge_pls requires gradients in U-space.');
     end
 
-    grad_weight = 1.0;
-    if nargin >= 5 && isfield(ModelOpts, 'ge_pls_grad_weight') && ~isempty(ModelOpts.ge_pls_grad_weight)
-        grad_weight = ModelOpts.ge_pls_grad_weight;
+    opts = struct();
+    if nargin >= 5 && isfield(ModelOpts, 'ge_pls_opts') && ~isempty(ModelOpts.ge_pls_opts)
+        opts = ModelOpts.ge_pls_opts;
     end
+    opts = localSetDefault(opts, 'grad_weight', 1.0);
+
+    grad_weight = opts.grad_weight;
 
     Y_aug = [local_zscore_cols(Y), grad_weight * local_zscore_cols(dYdU)];
     [XL, YL, XS, YS, BETA, PCTVAR, MSE, stats] = ...
@@ -42,4 +46,10 @@ function Z = local_zscore_cols(X)
     sigma = std(X, 0, 1);
     sigma(sigma == 0) = 1;
     Z = (X - mu) ./ sigma;
+end
+
+function opts = localSetDefault(opts, fieldName, defaultVal)
+    if ~isfield(opts, fieldName) || isempty(opts.(fieldName))
+        opts.(fieldName) = defaultVal;
+    end
 end

@@ -3,7 +3,7 @@ function [X_red, ReduceModel] = aPC_dimReduction_skpca_hsic(U, Y, ModelOpts)
 % ---------------------------------------------------------
 % 按 KernelPCA 的外部适配器风格，实现监督 KPCA (HSIC) 的降维接口。
 %
-% 内部自动组装散落在 ModelOpts 中的 X-kernel & Y-kernel 字段：
+% 方法参数优先从 ModelOpts.skpca_opts 读取（推荐）：
 %
 %   kernel_type, kernel_gamma, kernel_degree, kernel_offset
 %   label_kernel_type, label_kernel_gamma, label_kernel_degree, label_kernel_offset
@@ -13,28 +13,23 @@ function [X_red, ReduceModel] = aPC_dimReduction_skpca_hsic(U, Y, ModelOpts)
 %   ReduceModel — 含 transform，用于 prediction 阶段
 % ---------------------------------------------------------
 
+    opts = struct();
+    if isfield(ModelOpts, 'skpca_opts') && ~isempty(ModelOpts.skpca_opts)
+        opts = ModelOpts.skpca_opts;
+    end
+
     %% ====== 1) 组装输入核 KernelX（对应 X → Kx） ======
 
     % 1.1 类型（必须给）
-    if ~isfield(ModelOpts,'kernel_type') || isempty(ModelOpts.kernel_type)
-        error('SKPCA-HSIC requires ModelOpts.kernel_type such as ''gaussian''.');
+    if ~isfield(opts,'kernel_type') || isempty(opts.kernel_type)
+        error('SKPCA-HSIC requires ModelOpts.skpca_opts.kernel_type such as ''gaussian''.');
     end
-    ktype = char(ModelOpts.kernel_type);
+    ktype = char(opts.kernel_type);
 
     % 1.2 可选参数
-    gammaX  = [];
-    degreeX = [];
-    offsetX = [];
-
-    if isfield(ModelOpts,'kernel_gamma')  && ~isempty(ModelOpts.kernel_gamma)
-        gammaX  = ModelOpts.kernel_gamma;
-    end
-    if isfield(ModelOpts,'kernel_degree') && ~isempty(ModelOpts.kernel_degree)
-        degreeX = ModelOpts.kernel_degree;
-    end
-    if isfield(ModelOpts,'kernel_offset') && ~isempty(ModelOpts.kernel_offset)
-        offsetX = ModelOpts.kernel_offset;
-    end
+    gammaX  = localGetOpt(opts, 'kernel_gamma',  []);
+    degreeX = localGetOpt(opts, 'kernel_degree', []);
+    offsetX = localGetOpt(opts, 'kernel_offset', []);
 
     % 1.3 构造输入核 Kernel
     kernelX = Kernel('type',   ktype, ...
@@ -46,25 +41,15 @@ function [X_red, ReduceModel] = aPC_dimReduction_skpca_hsic(U, Y, ModelOpts)
     %% ====== 2) 组装监督核 KernelY（对应 Y → Ky） ======
 
     % 若没有提供，默认用 linear（回归最稳定）
-    if ~isfield(ModelOpts,'label_kernel_type') || isempty(ModelOpts.label_kernel_type)
+    if ~isfield(opts,'label_kernel_type') || isempty(opts.label_kernel_type)
         ltype = 'linear';
     else
-        ltype = char(ModelOpts.label_kernel_type);
+        ltype = char(opts.label_kernel_type);
     end
 
-    gammaY  = [];
-    degreeY = [];
-    offsetY = [];
-
-    if isfield(ModelOpts,'label_kernel_gamma')  && ~isempty(ModelOpts.label_kernel_gamma)
-        gammaY  = ModelOpts.label_kernel_gamma;
-    end
-    if isfield(ModelOpts,'label_kernel_degree') && ~isempty(ModelOpts.label_kernel_degree)
-        degreeY = ModelOpts.label_kernel_degree;
-    end
-    if isfield(ModelOpts,'label_kernel_offset') && ~isempty(ModelOpts.label_kernel_offset)
-        offsetY = ModelOpts.label_kernel_offset;
-    end
+    gammaY  = localGetOpt(opts, 'label_kernel_gamma',  []);
+    degreeY = localGetOpt(opts, 'label_kernel_degree', []);
+    offsetY = localGetOpt(opts, 'label_kernel_offset', []);
 
     kernelY = Kernel('type',   ltype, ...
                      'gamma',  gammaY, ...
@@ -109,4 +94,12 @@ end
 function Z = local_skpca_predict(U_new, skpca)
     result = skpca.test(U_new);
     Z = result.score;
+end
+
+function val = localGetOpt(opts, optName, defaultVal)
+    if isfield(opts, optName) && ~isempty(opts.(optName))
+        val = opts.(optName);
+    else
+        val = defaultVal;
+    end
 end

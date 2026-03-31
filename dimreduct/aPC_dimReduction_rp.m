@@ -16,10 +16,10 @@ function [X_red, ReduceModel] = aPC_dimReduction_rp(U, ModelOpts)
 % 必需字段：
 %   ModelOpts.red_dim     : 目标降维维数 r
 %
-% 可选字段：
-%   ModelOpts.rp_type     : 'gaussian'(默认) | 'rademacher'
-%   ModelOpts.rp_scale    : 'jl'(默认) | 'none'
-%   ModelOpts.rp_seed     : 随机种子（默认空）
+% 可选字段（推荐使用 ModelOpts.rp_opts.*）：
+%   ModelOpts.rp_opts.type  : 'gaussian'(默认) | 'rademacher'
+%   ModelOpts.rp_opts.scale : 'jl'(默认) | 'none'
+%   ModelOpts.rp_opts.seed  : 随机种子（默认空）
 %
 % 输出：
 %   X_red       — 降维后变量 (N×r)
@@ -35,9 +35,14 @@ function [X_red, ReduceModel] = aPC_dimReduction_rp(U, ModelOpts)
     [N, M] = size(U);
 
     %% ====== 1) 读取参数 ======
-    rp_type  = local_getopt(ModelOpts, 'rp_type',  'gaussian');
-    rp_scale = local_getopt(ModelOpts, 'rp_scale', 'jl');
-    rp_seed  = local_getopt(ModelOpts, 'rp_seed',  []);
+    opts = struct();
+    if isfield(ModelOpts, 'rp_opts') && ~isempty(ModelOpts.rp_opts)
+        opts = ModelOpts.rp_opts;
+    end
+
+    rp_type  = local_getopt(opts, 'type',  'gaussian');
+    rp_scale = local_getopt(opts, 'scale', 'jl');
+    rp_seed  = local_getopt(opts, 'seed',  []);
 
     if ~isempty(rp_seed)
         rng(rp_seed);
@@ -83,9 +88,6 @@ function [X_red, ReduceModel] = aPC_dimReduction_rp(U, ModelOpts)
     ReduceModel.transform = @(U_new) U_new * params.R;
 end
 
-%% ============================================================
-% Safe option getter
-%% ============================================================
 function v = local_getopt(S, field, defaultVal)
     if isfield(S, field) && ~isempty(S.(field))
         v = S.(field);
