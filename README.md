@@ -62,11 +62,11 @@ GEAPCK 则适合在你不仅关心函数值拟合，还希望把局部导数信�
 
 ## 七、降维手册：为什么降维很重要，怎么理解不同方法
 
-在低维问题上，你完全可以不做降维。但一旦问题维度上来，尤其是当你同时使用 APCK/GEAPCK、较高阶多项式或者梯度增强时，计算量会迅速膨胀。降维的作用不是为了“看起来高级”，而是为了在保留主要结构的前提下，把模型拟合放到一个更低维、更稳定、更可控的空间里完成。当前框架支持的降维方法包括 `pls`、`ge_pls`、`as`、`as_pls`、`sas`、`sgs`、`pca`、`kpca`、`spca_hsic`、`skpca_hsic`、`mcp`、`ica` 和 `rp`。它们不是同一种东西的不同写法，而是各自代表不同建模假设。
+在低维问题上，你完全可以不做降维。但一旦问题维度上来，尤其是当你同时使用 APCK/GEAPCK、较高阶多项式或者梯度增强时，计算量会迅速膨胀。降维的作用不是为了“看起来高级”，而是为了在保留主要结构的前提下，把模型拟合放到一个更低维、更稳定、更可控的空间里完成。当前框架支持的降维方法包括 `pls`、`gepls`、`as`、`as_pls`、`sas`、`sgs`、`pca`、`kpca`、`spca_hsic`、`skpca_hsic`、`mcp`、`ica` 和 `rp`。它们不是同一种东西的不同写法，而是各自代表不同建模假设。
 
 PCA 是最经典的线性降维方法，完全由输入协方差结构决定。PLS 在此基础上进一步利用了输出信息，因此通常比 PCA 更适合代理建模任务，也通常是高维 surrogate 场景下最推荐的选择。KPCA 和 SKPCA-HSIC 引入核技巧，适用于非线性结构明显的任务；SPCA-HSIC 强调监督性；MCP 与 ICA 更偏向研究型使用；随机投影则适合快速压缩维度、做便宜的高维 baseline。
 
-需要特别注意的是，不是所有降维方法都能与 GEAPCK 搭配使用。原因并不在于“代码没写”，而在于 GEAPCK 需要把响应梯度从原始输入空间一路通过标准化和降维映射传播到模型空间，这要求降维方法在当前实现中能够提供显式线性映射。当前支持 GE 梯度传递的包括 `pls`、`ge_pls`、`as`、`as_pls`、`sas`、`sgs`、`pca`、`spca_hsic`、`rp`、`mcp` 和 `ica`。其中 `ge_pls`、`as`、`as_pls`、`sas` 与 `sgs` 在降维阶段本身就需要梯度信息，因此若训练数据中没有提供梯度，或没有可用于有限差分的模型函数，训练会直接报错。不支持的主要是 `kpca` 和 `skpca_hsic` 这类没有简单线性映射可供梯度链式传递的非线性核方法。因此，如果你的目标是“降维 + GEAPCK”，优先选择这些具备显式线性映射的方法会更稳妥。
+需要特别注意的是，不是所有降维方法都能与 GEAPCK 搭配使用。原因并不在于“代码没写”，而在于 GEAPCK 需要把响应梯度从原始输入空间一路通过标准化和降维映射传播到模型空间，这要求降维方法在当前实现中能够提供显式线性映射。当前支持 GE 梯度传递的包括 `pls`、`gepls`、`as`、`as_pls`、`sas`、`sgs`、`pca`、`spca_hsic`、`rp`、`mcp` 和 `ica`。其中 `gepls`、`as`、`as_pls`、`sas` 与 `sgs` 在降维阶段本身就需要梯度信息，因此若训练数据中没有提供梯度，或没有可用于有限差分的模型函数，训练会直接报错。不支持的主要是 `kpca` 和 `skpca_hsic` 这类没有简单线性映射可供梯度链式传递的非线性核方法。因此，如果你的目标是“降维 + GEAPCK”，优先选择这些具备显式线性映射的方法会更稳妥。
 
 ## 八、梯度手册：提供梯度、差分梯度与自动模式
 
@@ -146,9 +146,9 @@ APCK 和 GEAPCK 的本质都建立在 PCK 后端之上，而 PCK 后端里最重
 
 第三组是并行相关字段。用户真正显式设置的核心开关其实只有 `Parallel`。它通常写成 `0` 或 `1`，也可以理解为 `false` 或 `true`。它的含义不是“训练中所有地方都并行”，而是“允许框架自动选择合适的并行层级”。对 APC 来说，并行往往落在外层搜索网格；对 `sequential` 的 APCK/GEAPCK 来说，也主要是外层搜索并行；对 `optimal` 的 APCK/GEAPCK，如果搜索网格只有一个配置，那么并行可能下沉到 trend 路径内部。也正因为如此，`Parallel=1` 后你看到的打印标签可能是 `Parallel`，也可能是 `Trend-Parallel`，这取决于训练器最终判定的并行层级。你一般不需要直接手动管理内部的 `ParallelScope`，那是训练器自己决定的内部状态。
 
-第四组是降维相关字段。最核心的是 `ReductionMethod` 和 `red_dim`。`ReductionMethod` 当前支持 `'pls'`、`'ge_pls'`、`'as'`、`'as_pls'`、`'sas'`、`'sgs'`、`'pca'`、`'kpca'`、`'spca_hsic'`、`'skpca_hsic'`、`'mcp'`、`'ica'` 和 `'rp'`。如果不写这项，表示不做降维。`red_dim` 是目标降维后的维度，通常是标量，也可以作为搜索向量。例如 `red_dim = [2 4 6]` 表示训练器会在这几个候选维度间比较。对于某些核方法，如 `kpca` 和 `skpca_hsic`，`red_dim` 还可能支持 `(0,1)` 区间内的比例式写法，用来表示保留一定比例的主成分能量，但最常见和最稳妥的用法仍然是直接写成整数维度。
+第四组是降维相关字段。最核心的是 `ReductionMethod` 和 `red_dim`。`ReductionMethod` 当前支持 `'pls'`、`'gepls'`、`'as'`、`'as_pls'`、`'sas'`、`'sgs'`、`'pca'`、`'kpca'`、`'spca_hsic'`、`'skpca_hsic'`、`'mcp'`、`'ica'` 和 `'rp'`。如果不写这项，表示不做降维。`red_dim` 是目标降维后的维度，通常是标量，也可以作为搜索向量。例如 `red_dim = [2 4 6]` 表示训练器会在这几个候选维度间比较。对于某些核方法，如 `kpca` 和 `skpca_hsic`，`red_dim` 还可能支持 `(0,1)` 区间内的比例式写法，用来表示保留一定比例的主成分能量，但最常见和最稳妥的用法仍然是直接写成整数维度。
 
-与 `mcp_opts` 一样，建议把方法专属参数放到对应的子结构里，避免与全局 `ModelOpts` 字段冲突。例如：`ge_pls_opts.grad_weight`、`as_pls_opts.as_dim`、`sas_opts.alpha/beta/normalize_terms`、`sgs_opts.alpha/bandwidth/eps_reg/normalize/centerU`、`kpca_opts.*`、`skpca_opts.*`、`ica_opts.*`、`rp_opts.*`。这样做的好处是参数边界更清晰，也更方便后续扩展和维护。
+与 `mcp_opts` 一样，建议把方法专属参数放到对应的子结构里，避免与全局 `ModelOpts` 字段冲突。例如：`gepls_opts.grad_weight`、`as_pls_opts.as_dim`、`sas_opts.alpha/beta/normalize_terms`、`sgs_opts.alpha/bandwidth/eps_reg/normalize/centerU`、`kpca_opts.*`、`skpca_opts.*`、`ica_opts.*`、`rp_opts.*`。这样做的好处是参数边界更清晰，也更方便后续扩展和维护。
 
 在降维方法之外，还有一组与特定降维器绑定的参数。如果你用的是 KPCA 或 SKPCA-HSIC，推荐通过 `kpca_opts` / `skpca_opts` 配置核参数，而不是把字段散落在 `ModelOpts` 根层。常见字段包括 `kernel_type`、`kernel_gamma`、`kernel_degree` 和 `kernel_offset`；对于带标签核的监督方法（如 `skpca_hsic`），还会用到 `label_kernel_type`、`label_kernel_gamma`、`label_kernel_degree` 和 `label_kernel_offset`。这些参数的语义与输入核完全类似，只不过作用对象从输入换成了输出标签。除非你明确在研究核方法，不建议一开始把这些字段全都打开搜索；更合理的做法是先固定核类型，再只在 `gamma` 上做少量搜索。
 

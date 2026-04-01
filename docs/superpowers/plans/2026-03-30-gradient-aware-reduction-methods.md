@@ -12,7 +12,7 @@
 
 ## File Map
 
-- Create: `dimreduct/aPC_dimReduction_ge_pls.m`
+- Create: `dimreduct/aPC_dimReduction_gepls.m`
 - Create: `dimreduct/aPC_dimReduction_as_pls.m`
 - Create: `utils/aPC_PrepareUGradients.m`
 - Modify: `apc_train/aPC_TrainCandidate.m`
@@ -26,8 +26,8 @@
 **Files:**
 - Modify: `tests/TestModelTypes.m`
 
-- [ ] Add tests that `ge_pls` and `as_pls` error when gradients are unavailable.
-- [ ] Add tests that `ge_pls` and `as_pls` work with provided gradients in GEAPCK and produce reduced gradients of the expected size.
+- [ ] Add tests that `gepls` and `as_pls` error when gradients are unavailable.
+- [ ] Add tests that `gepls` and `as_pls` work with provided gradients in GEAPCK and produce reduced gradients of the expected size.
 - [ ] Run the focused tests and confirm they fail before implementation.
 
 ### Task 2: Precompute U-space gradients
@@ -44,12 +44,12 @@
 ### Task 3: Implement new reduction methods
 
 **Files:**
-- Create: `dimreduct/aPC_dimReduction_ge_pls.m`
+- Create: `dimreduct/aPC_dimReduction_gepls.m`
 - Create: `dimreduct/aPC_dimReduction_as_pls.m`
 - Modify: `dimreduct/aPC_dimReduction.m`
 - Modify: `utils/aPC_PrepareModelGradients.m`
 
-- [ ] Add `ge_pls` using multivariate PLS on `[Y, weighted standardized dYdU]`.
+- [ ] Add `gepls` using multivariate PLS on `[Y, weighted standardized dYdU]`.
 - [ ] Add `as_pls` using an active-subspace basis from gradients followed by PLS in that subspace.
 - [ ] Return explicit linear maps (`W` / total map) so GE gradient propagation remains linear.
 - [ ] Extend explicit reduction-method dispatch in `aPC_PrepareModelGradients` for the new methods.

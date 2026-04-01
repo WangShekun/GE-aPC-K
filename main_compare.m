@@ -21,8 +21,8 @@ ModelOpts.PCKType = 'sequential';          % PCK 策略：'sequential' | 'optima
 ModelOpts.Parallel = 0;                 % 是否并行搜索候选配置：0/1
 
 % === 降维设置 ===
-ModelOpts.ReductionMethod = 'sgs';    % 降维方法：'pls' | 'pca' | 'kpca' | 'mcp' | 'ica' | 'rp' | ...
-ModelOpts.red_dim = [15];              % 降维后的目标维数；可设为标量或搜索向量
+ModelOpts.ReductionMethod = 'as';    % 降维方法：'pls' | 'pca' | 'kpca' | 'mcp' | 'ica' | 'rp' | ...
+ModelOpts.red_dim = [20];              % 降维后的目标维数；可设为标量或搜索向量
 
 % === KPCA / SKPCA 输入核设置 ===
 % ModelOpts.kpca_opts.kernel_type = {'gaussian'};  % KPCA 输入核类型
@@ -67,16 +67,14 @@ ModelOpts.red_dim = [15];              % 降维后的目标维数；可设为标
 % ModelOpts.rp_opts.scale = 'jl';             % 是否做 Johnson-Lindenstrauss 缩放：'jl' | 'none'
 % ModelOpts.rp_opts.seed = 80;                % 随机种子
 
-% === 监督式as设置===
-% ModelOpts.sas_opts.alpha = 1;
-% ModelOpts.sas_opts.beta = 0.5;
-% ModelOpts.sas_opts.normalize_terms = true;
+% === sas设置===
+ModelOpts.sas_opts.weight_method = 'zpower';
 
 % === as_pls设置===
-ModelOpts.as_pls_opts.as_dim = 40;
+% ModelOpts.as_pls_opts.as_dim = 25;
 
-% === ge_pls设置===
-% ModelOpts.ge_pls_opts.grad_weight = 1.0;
+% === gepls设置===
+% ModelOpts.gepls_opts.gamma = 0.3;
 
 % === sgs设置===
 % ModelOpts.sgs_opts.alpha = 0.2;
@@ -102,7 +100,7 @@ ModelOpts.KrigingOpts.use_objective_gradient = 0;
 % ModelOpts.FDOpts.step = 1e-6;               % 相对步长，用于自动数值梯度
 
 % === 基准函数选择（含梯度） ===
-Benchmark.Name = 'dim100';          % 'ishigami' | 'wingweight' | 'morris10'
+Benchmark.Name = 'dim200';          % 'ishigami' | 'wingweight' | 'morris10'
 Benchmark.N_train = 200;
 Benchmark.N_val = 2000;
 Benchmark.GradientSource = 'finite-difference';  % 'provided' | 'finite-difference' | 'auto'
@@ -306,6 +304,14 @@ function spec = get_benchmark_spec(name)
         case 'dim100'
             spec.InputOpts = dim100_Input;
             spec.ModelFcn = @dim100;
+            
+        case 'dim150'
+            spec.InputOpts = dim150_Input;
+            spec.ModelFcn = @dim150;
+
+        case 'dim200'
+            spec.InputOpts = dim200_Input_Case2;
+            spec.ModelFcn = @dim200;
 
         otherwise
             error('Unsupported benchmark: %s', name);

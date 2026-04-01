@@ -82,12 +82,12 @@ function [data, ModelOpts, ReduceModel] = aPC_dimReduction(data, ModelOpts)
         case 'rp'
             [X_red, ReduceModel] = aPC_dimReduction_rp(U, ModelOpts);
 
-        case 'ge_pls'
+        case 'gepls'
             if isempty(Y), error('GE-PLS 降维需要 data.Y_train。'); end
             if ~isfield(data, 'dYdU_train') || isempty(data.dYdU_train)
-                error('aPC:ReductionGradientRequired', 'ge_pls requires precomputed gradients.');
+                error('aPC:ReductionGradientRequired', 'gepls requires precomputed gradients.');
             end
-            [X_red, ReduceModel] = aPC_dimReduction_ge_pls(U, Y, data.dYdU_train, ModelOpts.red_dim, ModelOpts);
+            [X_red, ReduceModel] = aPC_dimReduction_gepls(U, Y, data.dYdU_train, ModelOpts.red_dim, ModelOpts);
 
         case 'as_pls'
             if isempty(Y), error('AS-PLS 降维需要 data.Y_train。'); end
@@ -107,7 +107,7 @@ function [data, ModelOpts, ReduceModel] = aPC_dimReduction(data, ModelOpts)
             if ~isfield(data, 'dYdU_train') || isempty(data.dYdU_train)
                 error('aPC:ReductionGradientRequired', 'sas requires precomputed gradients.');
             end
-            [X_red, ReduceModel] = aPC_dimReduction_sas_hsic(U, data.dYdU_train, Y, ModelOpts.red_dim, ModelOpts);
+            [X_red, ReduceModel] = aPC_dimReduction_sas(U, Y, data.dYdU_train, ModelOpts.red_dim, ModelOpts);
 
         case 'sgs'
             if isempty(Y), error('SGS 降维需要 data.Y_train。'); end

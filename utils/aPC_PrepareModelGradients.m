@@ -88,9 +88,9 @@ function [A, ok] = localGetLinearMap(ReduceModel)
         return;
     end
 
-    if strcmp(method, 'ge_pls')
-        if isfield(p, 'W')
-            A = p.W;
+    if strcmp(method, 'gepls')
+        if isfield(p, 'A')
+            A = p.A;
             ok = true;
         end
         return;
@@ -113,8 +113,8 @@ function [A, ok] = localGetLinearMap(ReduceModel)
     end
 
     if strcmp(method, 'sas')
-        if isfield(p, 'W')
-            A = p.W;
+        if isfield(p, 'A')
+            A = p.A;
             ok = true;
         end
         return;

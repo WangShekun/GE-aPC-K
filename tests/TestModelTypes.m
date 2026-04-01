@@ -612,7 +612,7 @@ ModelOpts.qnorm = 1.0;
 ModelOpts.aPC_Method = 'stieltjes';
 ModelOpts.RegressionMethod = 'lars';
 ModelOpts.ModelType = 'apc';
-ModelOpts.ReductionMethod = 'ge_pls';
+ModelOpts.ReductionMethod = 'gepls';
 ModelOpts.red_dim = 2;
 ModelOpts.GradientMode = 'provided';
 
@@ -710,7 +710,7 @@ ModelOpts.RegressionMethod = 'lars';
 ModelOpts.ModelType = 'geapck';
 ModelOpts.PCKType = 'optimal';
 ModelOpts.GradientMode = 'provided';
-ModelOpts.ReductionMethod = 'ge_pls';
+ModelOpts.ReductionMethod = 'gepls';
 ModelOpts.red_dim = 2;
 ModelOpts.Parallel = 0;
 ModelOpts.KrigingOpts.optimize_theta = false;
@@ -721,7 +721,7 @@ ModelOpts.KrigingOpts.trend_range = [0.2, 0.2];
 Yhat = aPC_Predict(X, results, ModelOptsOut, ReduceModel);
 
 verifyEqual(testCase, lower(results.ModelType), 'geapck');
-verifyEqual(testCase, lower(ReduceModel.method), 'ge_pls');
+verifyEqual(testCase, lower(ReduceModel.method), 'gepls');
 verifySize(testCase, dataOut.dY_model, [N, 2]);
 verifySize(testCase, Yhat, [N, 1]);
 end
@@ -842,8 +842,8 @@ Yhat = aPC_Predict(X, results, ModelOptsOut, ReduceModel);
 verifyEqual(testCase, lower(results.ModelType), 'geapck');
 verifyEqual(testCase, lower(ReduceModel.method), 'sas');
 verifyEqual(testCase, size(dataOut.dY_model, 1), N);
-verifyEqual(testCase, size(dataOut.dY_model, 2), ReduceModel.params.ncomp_used);
-verifyLessThanOrEqual(testCase, ReduceModel.params.ncomp_used, ModelOpts.red_dim);
+verifyEqual(testCase, size(dataOut.dY_model, 2), size(ReduceModel.params.A, 2));
+verifyEqual(testCase, size(ReduceModel.params.A, 2), ModelOpts.red_dim);
 verifySize(testCase, Yhat, [N, 1]);
 end
 
@@ -901,16 +901,16 @@ ModelOpts.RegressionMethod = 'lars';
 ModelOpts.ModelType = 'geapck';
 ModelOpts.PCKType = 'optimal';
 ModelOpts.GradientMode = 'provided';
-ModelOpts.ReductionMethod = 'ge_pls';
+ModelOpts.ReductionMethod = 'gepls';
 ModelOpts.red_dim = 2;
-ModelOpts.ge_pls_opts = struct('grad_weight', 2.5);
+ModelOpts.gepls_opts = struct('gamma', 2.5);
 ModelOpts.Parallel = 0;
 ModelOpts.KrigingOpts.optimize_theta = false;
 ModelOpts.KrigingOpts.theta0 = [0.8, 1.2];
 ModelOpts.KrigingOpts.trend_range = [0.2, 0.2];
 
 [~, ~, ~, ReduceModel] = aPC_Train(data, ModelOpts);
-verifyEqual(testCase, ReduceModel.params.grad_weight, 2.5, 'AbsTol', 1e-12);
+verifyEqual(testCase, ReduceModel.params.gamma, 2.5, 'AbsTol', 1e-12);
 end
 
 function testASPLSReductionUsesNestedOpts(testCase)
@@ -965,16 +965,52 @@ ModelOpts.PCKType = 'optimal';
 ModelOpts.GradientMode = 'provided';
 ModelOpts.ReductionMethod = 'sas';
 ModelOpts.red_dim = 2;
-ModelOpts.sas_opts = struct('alpha', 0.8, 'beta', 0.1, 'normalize_terms', false);
+ModelOpts.sas_opts = struct('response_power', 3.0, 'weight_eps', 1e-6);
 ModelOpts.Parallel = 0;
 ModelOpts.KrigingOpts.optimize_theta = false;
 ModelOpts.KrigingOpts.theta0 = [0.8, 1.2];
 ModelOpts.KrigingOpts.trend_range = [0.2, 0.2];
 
 [~, ~, ~, ReduceModel] = aPC_Train(data, ModelOpts);
-verifyEqual(testCase, ReduceModel.params.alpha, 0.8, 'AbsTol', 1e-12);
-verifyEqual(testCase, ReduceModel.params.beta, 0.1, 'AbsTol', 1e-12);
-verifyEqual(testCase, ReduceModel.params.normalize_terms, false);
+verifyEqual(testCase, ReduceModel.params.response_power, 3.0, 'AbsTol', 1e-12);
+verifyEqual(testCase, ReduceModel.params.weight_eps, 1e-6, 'AbsTol', 1e-12);
+verifyEqual(testCase, lower(ReduceModel.params.weight_method), 'zpower');
+verifyEqual(testCase, size(ReduceModel.params.A, 2), ModelOpts.red_dim);
+end
+
+function testSASReductionSupportsDensityWeightMethod(testCase)
+N = 18;
+X = rand(N, 3) * 2 - 1;
+Y = sin(X(:,1)) + 0.5 * X(:,2).^2 - 0.2 * X(:,3);
+dYdX = [cos(X(:,1)), X(:,2), -0.2 * ones(N, 1)];
+
+data = struct();
+data.X_train = X;
+data.Y_train = Y;
+data.dYdX_train = dYdX;
+
+ModelOpts = struct();
+ModelOpts.Order = 3;
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.ModelType = 'geapck';
+ModelOpts.PCKType = 'optimal';
+ModelOpts.GradientMode = 'provided';
+ModelOpts.ReductionMethod = 'sas';
+ModelOpts.red_dim = 2;
+ModelOpts.sas_opts = struct('weight_method', 'density', 'gamma', 0.7, 'sigma_y', 0.25);
+ModelOpts.Parallel = 0;
+ModelOpts.KrigingOpts.optimize_theta = false;
+ModelOpts.KrigingOpts.theta0 = [0.8, 1.2];
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.2];
+
+[~, ~, ~, ReduceModel] = aPC_Train(data, ModelOpts);
+
+verifyEqual(testCase, lower(ReduceModel.params.weight_method), 'density');
+verifyEqual(testCase, ReduceModel.params.gamma, 0.7, 'AbsTol', 1e-12);
+verifyGreaterThanOrEqual(testCase, min(ReduceModel.params.weights), 1.0 - 1e-12);
+verifyLessThanOrEqual(testCase, max(ReduceModel.params.weights), 1.7 + 1e-12);
 end
 
 function testSGSReductionUsesNestedOpts(testCase)
