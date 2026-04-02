@@ -601,6 +601,34 @@ verifyError(testCase, @() aPC_PrepareModelGradients(data, map_U, ReduceModel, Mo
     'aPC:UnsupportedGEReduction');
 end
 
+function testPrepareModelGradientsAllowsOnlyPrecomputedUGradient(testCase)
+data = struct();
+data.X_train = [1 2 3; 4 5 6];
+data.dYdU_train = [0.11 0.22 0.33; 0.44 0.55 0.66];
+
+map_U = struct();
+map_U.nonConstIdx = [true true true];
+map_U.sigma = [2 3 4];
+
+ModelOpts = struct();
+ModelOpts.GradientMode = 'provided';
+
+[dY_model, dYdX] = aPC_PrepareModelGradients(data, map_U, [], ModelOpts);
+
+verifyEqual(testCase, dY_model, data.dYdU_train, 'AbsTol', 1e-12);
+verifyTrue(testCase, isempty(dYdX));
+end
+
+function testSPCAHSICModelInfoDoesNotStoreKy(testCase)
+U = rand(16, 4);
+Y = sin(U(:,1)) + U(:,2).^2;
+
+[~, ReduceModel] = aPC_dimReduction_spca_hsic(U, Y, 2);
+
+verifyTrue(testCase, isfield(ReduceModel, 'info'));
+verifyFalse(testCase, isfield(ReduceModel.info, 'Ky'));
+end
+
 function testGEPLSReductionRequiresGradients(testCase)
 data = struct();
 data.X_train = rand(8, 3);

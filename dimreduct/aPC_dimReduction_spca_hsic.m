@@ -147,7 +147,6 @@ function [X_red, ReduceModel] = aPC_dimReduction_spca_hsic(U, Y, ncomp)
     ReduceModel.info.eigvals = eigvals;
     ReduceModel.info.effective_rank = r_eff;
     ReduceModel.info.rank_B = rB;
-    ReduceModel.info.Ky = Ky;
 
     % 注意：U_new 必须已按训练集方式标准化
     ReduceModel.transform = @(U_new) (U_new * W);

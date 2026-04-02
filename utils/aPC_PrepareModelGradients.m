@@ -5,7 +5,11 @@ function [dY_model, dYdX] = aPC_PrepareModelGradients(data, map_U, ReduceModel, 
 
     if isfield(data, 'dYdU_train') && ~isempty(data.dYdU_train)
         dYdU = data.dYdU_train;
-        dYdX = data.dYdX_train;
+        if isfield(data, 'dYdX_train') && ~isempty(data.dYdX_train)
+            dYdX = data.dYdX_train;
+        else
+            dYdX = [];
+        end
     else
         [dYdU, dYdX] = aPC_PrepareUGradients(data, map_U, ModelOpts);
     end
