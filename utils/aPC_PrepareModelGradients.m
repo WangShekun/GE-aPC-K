@@ -3,39 +3,16 @@ function [dY_model, dYdX] = aPC_PrepareModelGradients(data, map_U, ReduceModel, 
     % Prepare response gradients for GEAPCK in the exact coordinate system used by
     % the backend: physical X -> standardized U -> optional reduced coordinates.
 
-    if ~isfield(ModelOpts, 'GradientMode') || isempty(ModelOpts.GradientMode)
-        ModelOpts.GradientMode = 'auto';
-    end
-
-    mode = lower(strtrim(ModelOpts.GradientMode));
-    has_grad = isfield(data, 'dYdX_train') && ~isempty(data.dYdX_train);
-
-    switch mode
-        case 'provided'
-            if ~has_grad
-                error('aPC:MissingProvidedGradient', 'GradientMode=provided but data.dYdX_train is missing.');
-            end
+    if isfield(data, 'dYdU_train') && ~isempty(data.dYdU_train)
+        dYdU = data.dYdU_train;
+        if isfield(data, 'dYdX_train') && ~isempty(data.dYdX_train)
             dYdX = data.dYdX_train;
-        case 'finite-difference'
-            dYdX = aPC_FDGradients(data, ModelOpts);
-        case 'auto'
-            if has_grad
-                dYdX = data.dYdX_train;
-            else
-                dYdX = aPC_FDGradients(data, ModelOpts);
-            end
-        otherwise
-            error('aPC:InvalidGradientMode', 'Unsupported GradientMode: %s', ModelOpts.GradientMode);
+        else
+            dYdX = [];
+        end
+    else
+        [dYdU, dYdX] = aPC_PrepareUGradients(data, map_U, ModelOpts);
     end
-
-    if size(dYdX, 2) ~= size(data.X_train, 2)
-        error('aPC:GradientSizeMismatch', 'dYdX_train must match X_train dimension.');
-    end
-
-    idx = map_U.nonConstIdx;
-    sigma = map_U.sigma;
-    % Since U = (X - mu) ./ sigma, gradients transform as dY/dU = dY/dX .* sigma.
-    dYdU = dYdX(:, idx) .* sigma;
 
     if isempty(ReduceModel)
         dY_model = dYdU;
@@ -83,7 +60,7 @@ function [A, ok] = localGetLinearMap(ReduceModel)
         return;
     end
 
-    if strcmp(method, 'spca-primal') || strcmp(method, 'spca-dual')
+    if strcmp(method, 'spca_hsic')
         if isfield(p, 'W')
             A = p.W;
             ok = true;
@@ -110,6 +87,46 @@ function [A, ok] = localGetLinearMap(ReduceModel)
     if strcmp(method, 'ica')
         if isfield(p, 'Pwhite') && isfield(p, 'W')
             A = p.Pwhite * p.W';
+            ok = true;
+        end
+        return;
+    end
+
+    if strcmp(method, 'gepls')
+        if isfield(p, 'A')
+            A = p.A;
+            ok = true;
+        end
+        return;
+    end
+
+    if strcmp(method, 'as_pls')
+        if isfield(p, 'A')
+            A = p.A;
+            ok = true;
+        end
+        return;
+    end
+
+    if strcmp(method, 'as')
+        if isfield(p, 'A')
+            A = p.A;
+            ok = true;
+        end
+        return;
+    end
+
+    if strcmp(method, 'sas')
+        if isfield(p, 'A')
+            A = p.A;
+            ok = true;
+        end
+        return;
+    end
+
+    if strcmp(method, 'sgs')
+        if isfield(p, 'A')
+            A = p.A;
             ok = true;
         end
         return;

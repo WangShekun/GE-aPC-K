@@ -2,12 +2,12 @@ function [X_red, ReduceModel] = aPC_dimReduction_kpca(U, ModelOpts)
 % aPC_dimReduction_kpca
 % ---------------------------------------------------------
 % 按官方 KPCA-MATLAB README 实现的降维适配器。
-% 内部自动组装散落在 ModelOpts 中的 kernel 字段：
+% 方法参数优先从 ModelOpts.kpca_opts 读取（推荐）：
 %
-%   kernel_type
-%   kernel_gamma
-%   kernel_degree
-%   kernel_offset
+%   ModelOpts.kpca_opts.kernel_type
+%   ModelOpts.kpca_opts.kernel_gamma
+%   ModelOpts.kpca_opts.kernel_degree
+%   ModelOpts.kpca_opts.kernel_offset
 %
 % 输出：
 %   X_red       — 训练降维空间
@@ -16,26 +16,21 @@ function [X_red, ReduceModel] = aPC_dimReduction_kpca(U, ModelOpts)
 
     %% ====== 1) 组装 Kernel 对象 ======
 
-    % 1.1 类型（必须给）
-    if ~isfield(ModelOpts,'kernel_type') || isempty(ModelOpts.kernel_type)
-        error('KPCA requires ModelOpts.kernel_type such as ''gaussian''.');
+    opts = struct();
+    if isfield(ModelOpts, 'kpca_opts') && ~isempty(ModelOpts.kpca_opts)
+        opts = ModelOpts.kpca_opts;
     end
-    ktype = char(ModelOpts.kernel_type);
+
+    % 1.1 类型（必须给）
+    if ~isfield(opts,'kernel_type') || isempty(opts.kernel_type)
+        error('KPCA requires ModelOpts.kpca_opts.kernel_type such as ''gaussian''.');
+    end
+    ktype = char(opts.kernel_type);
 
     % 1.2 可选参数
-    gamma  = [];
-    degree = [];
-    offset = [];
-
-    if isfield(ModelOpts,'kernel_gamma')  && ~isempty(ModelOpts.kernel_gamma)
-        gamma  = ModelOpts.kernel_gamma;
-    end
-    if isfield(ModelOpts,'kernel_degree') && ~isempty(ModelOpts.kernel_degree)
-        degree = ModelOpts.kernel_degree;
-    end
-    if isfield(ModelOpts,'kernel_offset') && ~isempty(ModelOpts.kernel_offset)
-        offset = ModelOpts.kernel_offset;
-    end
+    gamma  = localGetOpt(opts, 'kernel_gamma',  []);
+    degree = localGetOpt(opts, 'kernel_degree', []);
+    offset = localGetOpt(opts, 'kernel_offset', []);
 
     % 1.3 构造 Kernel 对象（KPCA-MATLAB 接受 [] 默认值）
     kernel = Kernel('type',   ktype, ...
@@ -79,4 +74,12 @@ end
 function Z = local_kpca_predict(U_new, kpca)
     result = kpca.test(U_new);
     Z = result.score;
+end
+
+function val = localGetOpt(opts, optName, defaultVal)
+    if isfield(opts, optName) && ~isempty(opts.(optName))
+        val = opts.(optName);
+    else
+        val = defaultVal;
+    end
 end

@@ -62,11 +62,11 @@ GEAPCK 则适合在你不仅关心函数值拟合，还希望把局部导数信�
 
 ## 七、降维手册：为什么降维很重要，怎么理解不同方法
 
-在低维问题上，你完全可以不做降维。但一旦问题维度上来，尤其是当你同时使用 APCK/GEAPCK、较高阶多项式或者梯度增强时，计算量会迅速膨胀。降维的作用不是为了“看起来高级”，而是为了在保留主要结构的前提下，把模型拟合放到一个更低维、更稳定、更可控的空间里完成。当前框架支持的降维方法包括 `pls`、`pca`、`kpca`、`spca_hsic`、`skpca_hsic`、`mcp`、`ica` 和 `rp`。它们不是同一种东西的不同写法，而是各自代表不同建模假设。
+在低维问题上，你完全可以不做降维。但一旦问题维度上来，尤其是当你同时使用 APCK/GEAPCK、较高阶多项式或者梯度增强时，计算量会迅速膨胀。降维的作用不是为了“看起来高级”，而是为了在保留主要结构的前提下，把模型拟合放到一个更低维、更稳定、更可控的空间里完成。当前框架支持的降维方法包括 `pls`、`gepls`、`as`、`as_pls`、`sas`、`sgs`、`pca`、`kpca`、`spca_hsic`、`skpca_hsic`、`mcp`、`ica` 和 `rp`。它们不是同一种东西的不同写法，而是各自代表不同建模假设。
 
 PCA 是最经典的线性降维方法，完全由输入协方差结构决定。PLS 在此基础上进一步利用了输出信息，因此通常比 PCA 更适合代理建模任务，也通常是高维 surrogate 场景下最推荐的选择。KPCA 和 SKPCA-HSIC 引入核技巧，适用于非线性结构明显的任务；SPCA-HSIC 强调监督性；MCP 与 ICA 更偏向研究型使用；随机投影则适合快速压缩维度、做便宜的高维 baseline。
 
-需要特别注意的是，不是所有降维方法都能与 GEAPCK 搭配使用。原因并不在于“代码没写”，而在于 GEAPCK 需要把响应梯度从原始输入空间一路通过标准化和降维映射传播到模型空间，这要求降维方法在当前实现中能够提供显式线性映射。当前支持 GE 梯度传递的包括 `pls`、`pca`、`spca_hsic`、`rp`、`mcp` 和 `ica`。不支持的主要是 `kpca` 和 `skpca_hsic` 这类没有简单线性映射可供梯度链式传递的非线性核方法。因此，如果你的目标是“降维 + GEAPCK”，优先选择 `pls`、`pca` 或 `spca_hsic` 会更稳妥。
+需要特别注意的是，不是所有降维方法都能与 GEAPCK 搭配使用。原因并不在于“代码没写”，而在于 GEAPCK 需要把响应梯度从原始输入空间一路通过标准化和降维映射传播到模型空间，这要求降维方法在当前实现中能够提供显式线性映射。当前支持 GE 梯度传递的包括 `pls`、`gepls`、`as`、`as_pls`、`sas`、`sgs`、`pca`、`spca_hsic`、`rp`、`mcp` 和 `ica`。其中 `gepls`、`as`、`as_pls`、`sas` 与 `sgs` 在降维阶段本身就需要梯度信息，因此若训练数据中没有提供梯度，或没有可用于有限差分的模型函数，训练会直接报错。不支持的主要是 `kpca` 和 `skpca_hsic` 这类没有简单线性映射可供梯度链式传递的非线性核方法。因此，如果你的目标是“降维 + GEAPCK”，优先选择这些具备显式线性映射的方法会更稳妥。
 
 ## 八、梯度手册：提供梯度、差分梯度与自动模式
 
@@ -120,7 +120,7 @@ APCK 和 GEAPCK 的本质都建立在 PCK 后端之上，而 PCK 后端里最重
 
 另一个非常常见的问题是“为什么串行和并行会有一点不一样”。这个问题在 APC 上通常不存在，但在 `optimal + optimize_theta=true` 的 APCK/GEAPCK 路径上是可能出现的。当前调查结果显示，这类差异主要来自 `theta` 数值优化本身，而不是模型选择流程写错。若差异非常小，属于正常数值现象；若差异大到改变了趋势项结构或误差量级，则应该进一步排查。
 
-关于梯度，最容易出错的地方是数据格式。框架需要的是 `N x M` 的一阶梯度矩阵，而不是单列导数，也不是 Hessian。如果你开启了 GEAPCK 却没有给解析梯度，那么请确保 `data.ModelFcn` 存在，并且 `GradientMode` 允许差分回退。对于降维，如果你的目标是 GEAPCK，请优先选择支持显式线性映射的方法，例如 `pls`、`pca` 或 `spca_hsic`。如果你选的是 `kpca` 或 `skpca_hsic` 之类的非线性核降维，那么目前不适合做 GE 梯度传递。
+关于梯度，最容易出错的地方是数据格式。框架需要的是 `N x M` 的一阶梯度矩阵，而不是单列导数，也不是 Hessian。如果你开启了 GEAPCK 却没有给解析梯度，那么请确保 `data.ModelFcn` 存在，并且 `GradientMode` 允许差分回退。对于降维，如果你的目标是 GEAPCK，请优先选择支持显式线性映射的方法，例如 `pls`、`pca`、`spca_hsic`、`sas` 或 `sgs`。如果你选的是 `kpca` 或 `skpca_hsic` 之类的非线性核降维，那么目前不适合做 GE 梯度传递。
 
 最后，关于文档使用方式也给一个建议：当你只是想“跑”，优先看 `main.m` 和 `main_compare.m`；当你想理解流程，回来看本手册的训练、模型与并行章节；当你要扩展算法，优先读 `apc_train`、`coefficients/aPC_PCKBackend.m`、`coefficients/pck/` 与 `utils/aPC_PrepareModelGradients.m`。这套框架已经不是一个很小的脚本，而是一套逐渐成型的建模平台，因此最好的学习方式不是死盯一个函数，而是先理解整体流程，再逐层深入。
 
@@ -146,15 +146,17 @@ APCK 和 GEAPCK 的本质都建立在 PCK 后端之上，而 PCK 后端里最重
 
 第三组是并行相关字段。用户真正显式设置的核心开关其实只有 `Parallel`。它通常写成 `0` 或 `1`，也可以理解为 `false` 或 `true`。它的含义不是“训练中所有地方都并行”，而是“允许框架自动选择合适的并行层级”。对 APC 来说，并行往往落在外层搜索网格；对 `sequential` 的 APCK/GEAPCK 来说，也主要是外层搜索并行；对 `optimal` 的 APCK/GEAPCK，如果搜索网格只有一个配置，那么并行可能下沉到 trend 路径内部。也正因为如此，`Parallel=1` 后你看到的打印标签可能是 `Parallel`，也可能是 `Trend-Parallel`，这取决于训练器最终判定的并行层级。你一般不需要直接手动管理内部的 `ParallelScope`，那是训练器自己决定的内部状态。
 
-第四组是降维相关字段。最核心的是 `ReductionMethod` 和 `red_dim`。`ReductionMethod` 当前支持 `'pls'`、`'pca'`、`'kpca'`、`'spca_hsic'`、`'skpca_hsic'`、`'mcp'`、`'ica'` 和 `'rp'`。如果不写这项，表示不做降维。`red_dim` 是目标降维后的维度，通常是标量，也可以作为搜索向量。例如 `red_dim = [2 4 6]` 表示训练器会在这几个候选维度间比较。对于某些核方法，如 `kpca` 和 `skpca_hsic`，`red_dim` 还可能支持 `(0,1)` 区间内的比例式写法，用来表示保留一定比例的主成分能量，但最常见和最稳妥的用法仍然是直接写成整数维度。
+第四组是降维相关字段。最核心的是 `ReductionMethod` 和 `red_dim`。`ReductionMethod` 当前支持 `'pls'`、`'gepls'`、`'as'`、`'as_pls'`、`'sas'`、`'sgs'`、`'pca'`、`'kpca'`、`'spca_hsic'`、`'skpca_hsic'`、`'mcp'`、`'ica'` 和 `'rp'`。如果不写这项，表示不做降维。`red_dim` 是目标降维后的维度，通常是标量，也可以作为搜索向量。例如 `red_dim = [2 4 6]` 表示训练器会在这几个候选维度间比较。对于某些核方法，如 `kpca` 和 `skpca_hsic`，`red_dim` 还可能支持 `(0,1)` 区间内的比例式写法，用来表示保留一定比例的主成分能量，但最常见和最稳妥的用法仍然是直接写成整数维度。
 
-在降维方法之外，还有一组与特定降维器绑定的参数。如果你用的是 KPCA 或 SKPCA-HSIC，最常见的字段是 `kernel_type`、`kernel_gamma`、`kernel_degree` 和 `kernel_offset`。这些字段分别对应输入核的类型、核尺度、核次数与偏置项。典型情形下，`kernel_type` 可以是 `'gaussian'`，此时最重要的是 `kernel_gamma`；如果使用多项式核，则 `kernel_degree` 和 `kernel_offset` 也变得重要。对于带标签核的监督方法，如 `skpca_hsic`，还会用到 `label_kernel_type`、`label_kernel_gamma`、`label_kernel_degree` 和 `label_kernel_offset`。这些参数的语义与输入核完全类似，只不过作用对象从输入换成了输出标签。除非你明确在研究核方法，不建议一开始把这些字段全都打开搜索；更合理的做法是先固定核类型，再只在 `gamma` 上做少量搜索。
+与 `mcp_opts` 一样，建议把方法专属参数放到对应的子结构里，避免与全局 `ModelOpts` 字段冲突。例如：`gepls_opts.grad_weight`、`as_pls_opts.as_dim`、`sas_opts.alpha/beta/normalize_terms`、`sgs_opts.alpha/bandwidth/eps_reg/normalize/centerU`、`kpca_opts.*`、`skpca_opts.*`、`ica_opts.*`、`rp_opts.*`。这样做的好处是参数边界更清晰，也更方便后续扩展和维护。
+
+在降维方法之外，还有一组与特定降维器绑定的参数。如果你用的是 KPCA 或 SKPCA-HSIC，推荐通过 `kpca_opts` / `skpca_opts` 配置核参数，而不是把字段散落在 `ModelOpts` 根层。常见字段包括 `kernel_type`、`kernel_gamma`、`kernel_degree` 和 `kernel_offset`；对于带标签核的监督方法（如 `skpca_hsic`），还会用到 `label_kernel_type`、`label_kernel_gamma`、`label_kernel_degree` 和 `label_kernel_offset`。这些参数的语义与输入核完全类似，只不过作用对象从输入换成了输出标签。除非你明确在研究核方法，不建议一开始把这些字段全都打开搜索；更合理的做法是先固定核类型，再只在 `gamma` 上做少量搜索。
 
 如果你使用的是 `mcp`，则会接触到 `mcp_opts` 这组嵌套字段。当前常见的包括 `mcp_opts.maxIter`、`mcp_opts.whiten`、`mcp_opts.alpha_cov`、`mcp_opts.max_moment_order`、`mcp_opts.moment_base`、`mcp_opts.moment_decay`、`mcp_opts.lambda_y`、`mcp_opts.supervision_mode` 和 `mcp_opts.manopt_solver`。这些参数整体上决定了 MCP 目标函数更偏向哪类统计结构、如何加权高阶矩、是否引入监督项，以及用什么优化器求解。如果你没有明确的研究需求，MCP 往往不应该是第一选择，它更适合作为高阶结构探索或方法对比使用。
 
-如果你使用 ICA，则会接触到 `ica_approach`、`ica_fun`、`ica_a1`、`ica_a2`、`ica_epsilon`、`ica_maxIter`、`ica_mu`、`ica_stabilization`、`ica_whiten_solver`、`ica_seed` 和 `ica_verbose`。这些参数基本都遵循 ICA 领域的常规定义：使用对称法还是 deflation、非线性函数选择哪一种、收敛阈值如何设定、最大迭代次数是多少、是否稳定化、白化是用 SVD 还是特征值分解、是否固定随机种子等等。如果你的目标仅仅是“降一点维然后建模”，ICA 通常不是最优先的方法；但如果你希望研究独立成分结构，它就会很有价值。
+如果你使用 ICA，推荐把参数收敛在 `ica_opts` 中，例如 `ica_opts.approach`、`ica_opts.fun`、`ica_opts.a1`、`ica_opts.a2`、`ica_opts.epsilon`、`ica_opts.maxIter`、`ica_opts.mu`、`ica_opts.stabilization`、`ica_opts.whiten_solver`、`ica_opts.seed` 和 `ica_opts.verbose`。这些参数基本都遵循 ICA 领域的常规定义：使用对称法还是 deflation、非线性函数选择哪一种、收敛阈值如何设定、最大迭代次数是多少、是否稳定化、白化是用 SVD 还是特征值分解、是否固定随机种子等等。如果你的目标仅仅是“降一点维然后建模”，ICA 通常不是最优先的方法；但如果你希望研究独立成分结构，它就会很有价值。
 
-随机投影相关字段相对简单，主要是 `rp_type`、`rp_scale` 和 `rp_seed`。`rp_type` 支持 `'gaussian'` 和 `'rademacher'`，分别对应高斯随机矩阵和取值为 `±1` 的随机矩阵。`rp_scale` 则控制是否按 Johnson-Lindenstrauss 思路缩放，常见值是 `'jl'` 或 `'none'`。在需要一个便宜且快速的高维 baseline 时，随机投影往往很有帮助。
+随机投影相关字段相对简单，推荐放在 `rp_opts` 中：`rp_opts.type`、`rp_opts.scale` 和 `rp_opts.seed`。`type` 支持 `'gaussian'` 和 `'rademacher'`，分别对应高斯随机矩阵和取值为 `±1` 的随机矩阵；`scale` 控制是否按 Johnson-Lindenstrauss 思路缩放，常见值是 `'jl'` 或 `'none'`。在需要一个便宜且快速的高维 baseline 时，随机投影往往很有帮助。
 
 第五组是 APCK/GEAPCK 的 Kriging 相关参数，也就是 `KrigingOpts`。这部分是很多人最关心、也最容易调得过多的地方。最核心的字段是 `KrigingOpts.corr`、`KrigingOpts.theta0`、`KrigingOpts.theta_lb`、`KrigingOpts.theta_ub`、`KrigingOpts.nugget`、`KrigingOpts.optimize_theta`、`KrigingOpts.trend_range`、`KrigingOpts.DisplayProgress` 和 `KrigingOpts.early_stop_patience`。`corr` 支持 `'gaussian'`、`'exponential'` 和 `'matern32'`，但需要记住这只是 APCK 的全集；GEAPCK 当前只支持 `'gaussian'` 和 `'matern32'`，不支持 `'exponential'`。`theta0` 是长度尺度初值，若写成标量会自动扩展到每个输入维度；`theta_lb` 和 `theta_ub` 是长度尺度的下界与上界，同样支持标量自动扩展。`nugget` 是数值稳定项，用来改善协方差矩阵条件数。通常如果矩阵病态或训练点接近重复，适当增大 `nugget` 会更稳。
 
@@ -162,6 +164,6 @@ APCK 和 GEAPCK 的本质都建立在 PCK 后端之上，而 PCK 后端里最重
 
 第六组是差分梯度相关设置，也就是 `FDOpts`。这组字段只在 GEAPCK 且梯度模式允许差分回退时才起作用。当前主要有 `FDOpts.type` 和 `FDOpts.step`。`FDOpts.type` 支持 `'forward'` 和 `'central'`。前向差分更便宜，但精度稍低；中心差分更稳，代价也更高。`FDOpts.step` 是相对扰动步长，它会影响数值梯度的稳定性和精度。如果你发现差分梯度导致结果异常波动，可以先从步长检查起。
 
-最后，还要强调一个经常被误解的问题：哪些字段支持自动搜索，哪些字段只是单次配置。像 `Order`、`qnorm`、`red_dim`、`kernel_gamma`、`kernel_degree`、`kernel_offset`、`label_kernel_gamma`、`KrigingOpts.corr`、`KrigingOpts.nugget` 等，都可以作为搜索字段写成向量；而像 `theta0`、`theta_lb`、`theta_ub` 这种更偏向优化器定义的字段，一般不建议直接做笛卡尔积搜索。当前测试中也专门保留了“`theta0` 不属于搜索字段”的检查，这正说明框架设计上并不鼓励把所有数值参数都扔进外层网格。
+最后，还要强调一个经常被误解的问题：哪些字段支持自动搜索，哪些字段只是单次配置。像 `Order`、`qnorm`、`red_dim`、`KrigingOpts.corr`、`KrigingOpts.nugget` 等，都可以作为搜索字段写成向量；而像 `theta0`、`theta_lb`、`theta_ub` 这种更偏向优化器定义的字段，一般不建议直接做笛卡尔积搜索。对于降维方法专属参数，建议通过各自的 `*_opts` 子结构管理，并按需要在实验脚本里做受控搜索。当前测试中也专门保留了“`theta0` 不属于搜索字段”的检查，这正说明框架设计上并不鼓励把所有数值参数都扔进外层网格。
 
 如果你把这组字段理解成一整套“层层展开的控制系统”，而不是一份零散的参数表，就会更容易把握这套框架。最外层由 `ModelType` 决定走 APC 还是 PCK 家族；若走 PCK，再由 `PCKType` 决定趋势搜索方式；若走 GE，再由 `GradientMode` 决定梯度来源；如果还要降维，则由 `ReductionMethod` 和其附属参数决定模型空间；最后，Kriging 相关参数再控制残差模型的具体形式。理解了这个层级关系后，配置就不再是“乱七八糟的一堆字段”，而是一棵有组织的决策树。

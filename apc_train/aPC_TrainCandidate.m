@@ -1,7 +1,7 @@
 function candidate = aPC_TrainCandidate(data, map_U, ModelOpts)
 % Train one candidate configuration in the current model space.
 
-    [data_model, ModelOptsOut, ReduceModel] = localPrepareModelSpace(data, ModelOpts);
+    [data_model, data_grad, ModelOptsOut, ReduceModel] = localPrepareModelSpace(data, map_U, ModelOpts);
 
     ModelOptsOut.Indices = aPC_GenerateTerms(ModelOptsOut);
     [Psi, poly_coeffs, univ_vals] = aPC_PCE_build_Psi(ModelOptsOut, data_model);
@@ -21,7 +21,7 @@ function candidate = aPC_TrainCandidate(data, map_U, ModelOpts)
             % GEAPCK needs response gradients mapped into the same reduced/model
             % space used to build the covariance system.
             [data_model.dY_model, data_model.dYdX_train] = ...
-                aPC_PrepareModelGradients(data, map_U, ReduceModel, ModelOptsOut);
+                aPC_PrepareModelGradients(data_grad, map_U, ReduceModel, ModelOptsOut);
         end
         results = aPC_PCKBackend(Psi, data_model, ModelOptsOut, basis_info);
     end
@@ -36,15 +36,30 @@ function candidate = aPC_TrainCandidate(data, map_U, ModelOpts)
     candidate.score = results.LOO;
 end
 
-function [data_model, ModelOptsOut, ReduceModel] = localPrepareModelSpace(data, ModelOpts)
+function [data_model, data_grad, ModelOptsOut, ReduceModel] = localPrepareModelSpace(data, map_U, ModelOpts)
+    data_grad = data;
+    if localNeedsGradientBeforeReduction(ModelOpts)
+        [data_grad.dYdU_train, data_grad.dYdX_train] = aPC_PrepareUGradients(data_grad, map_U, ModelOpts);
+    end
+
     if isfield(ModelOpts, 'red_dim') && ~isempty(ModelOpts.red_dim)
-        [data_model, ModelOptsOut, ReduceModel] = aPC_dimReduction(data, ModelOpts);
+        [data_model, ModelOptsOut, ReduceModel] = aPC_dimReduction(data_grad, ModelOpts);
     else
-        data_model = data;
+        data_model = data_grad;
         ModelOptsOut = ModelOpts;
         ReduceModel = [];
         if ~isfield(ModelOptsOut, 'num_vars') || isempty(ModelOptsOut.num_vars)
             ModelOptsOut.num_vars = size(data_model.U, 2);
         end
     end
+end
+
+function tf = localNeedsGradientBeforeReduction(ModelOpts)
+    tf = strcmpi(strtrim(ModelOpts.ModelType), 'geapck');
+    if tf || ~isfield(ModelOpts, 'ReductionMethod') || isempty(ModelOpts.ReductionMethod)
+        return;
+    end
+
+    method = lower(strtrim(ModelOpts.ReductionMethod));
+    tf = strcmp(method, 'gepls') || strcmp(method, 'as_pls') || strcmp(method, 'as') || strcmp(method, 'sas') || strcmp(method, 'sgs');
 end

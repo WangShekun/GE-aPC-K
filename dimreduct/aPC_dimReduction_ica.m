@@ -13,18 +13,18 @@ function [X_red, ReduceModel] = aPC_dimReduction_ica(U, ModelOpts)
 % 必需字段：
 %   ModelOpts.red_dim            : r（整数>0，目标独立成分数/降维维数）
 %
-% 可选字段（FastICA-like）：
-%   ModelOpts.ica_approach       : 'symm'(默认) | 'defl'
-%   ModelOpts.ica_fun            : 'tanh'(默认) | 'gauss' | 'pow3' | 'cube'
-%   ModelOpts.ica_epsilon        : 收敛阈值(默认 1e-4)
-%   ModelOpts.ica_maxIter        : 最大迭代(默认 200)
-%   ModelOpts.ica_mu             : 步长/阻尼(默认 1.0, (0,1] )
-%   ModelOpts.ica_stabilization  : 'off'(默认) | 'on'
-%   ModelOpts.ica_a1             : tanh 的 a1(默认 1.0)
-%   ModelOpts.ica_a2             : gauss 的 a2(默认 1.0)
-%   ModelOpts.ica_seed           : 随机种子(默认空)
-%   ModelOpts.ica_whiten_solver  : 'svd'(默认) | 'eig'
-%   ModelOpts.ica_verbose        : 0(默认) | 1
+% 可选字段（FastICA-like，推荐使用 ModelOpts.ica_opts.*）：
+%   ModelOpts.ica_opts.approach       : 'symm'(默认) | 'defl'
+%   ModelOpts.ica_opts.fun            : 'tanh'(默认) | 'gauss' | 'pow3' | 'cube'
+%   ModelOpts.ica_opts.epsilon        : 收敛阈值(默认 1e-4)
+%   ModelOpts.ica_opts.maxIter        : 最大迭代(默认 200)
+%   ModelOpts.ica_opts.mu             : 步长/阻尼(默认 1.0, (0,1] )
+%   ModelOpts.ica_opts.stabilization  : 'off'(默认) | 'on'
+%   ModelOpts.ica_opts.a1             : tanh 的 a1(默认 1.0)
+%   ModelOpts.ica_opts.a2             : gauss 的 a2(默认 1.0)
+%   ModelOpts.ica_opts.seed           : 随机种子(默认空)
+%   ModelOpts.ica_opts.whiten_solver  : 'svd'(默认) | 'eig'
+%   ModelOpts.ica_opts.verbose        : 0(默认) | 1
 %
 % 输出：
 %   X_red       — (N×r) 训练降维空间（估计的独立成分）
@@ -44,18 +44,23 @@ function [X_red, ReduceModel] = aPC_dimReduction_ica(U, ModelOpts)
     eps0 = 1e-12;
 
     %% ====== 1) 读取参数（FastICA-like） ======
+    opts_in = struct();
+    if isfield(ModelOpts, 'ica_opts') && ~isempty(ModelOpts.ica_opts)
+        opts_in = ModelOpts.ica_opts;
+    end
+
     opts = struct();
-    opts.approach      = local_getopt(ModelOpts, 'ica_approach',      'symm');
-    opts.fun           = local_getopt(ModelOpts, 'ica_fun',           'tanh');
-    opts.epsilon       = local_getopt(ModelOpts, 'ica_epsilon',       1e-4);
-    opts.maxIter       = local_getopt(ModelOpts, 'ica_maxIter',       200);
-    opts.mu            = local_getopt(ModelOpts, 'ica_mu',            1.0);
-    opts.stabilization = local_getopt(ModelOpts, 'ica_stabilization', 'off');
-    opts.a1            = local_getopt(ModelOpts, 'ica_a1',            1.0);
-    opts.a2            = local_getopt(ModelOpts, 'ica_a2',            1.0);
-    opts.seed          = local_getopt(ModelOpts, 'ica_seed',          []);
-    opts.whiten_solver = local_getopt(ModelOpts, 'ica_whiten_solver', 'svd');
-    opts.verbose       = local_getopt(ModelOpts, 'ica_verbose',       0);
+    opts.approach      = local_getopt(opts_in, 'approach',      'symm');
+    opts.fun           = local_getopt(opts_in, 'fun',           'tanh');
+    opts.epsilon       = local_getopt(opts_in, 'epsilon',       1e-4);
+    opts.maxIter       = local_getopt(opts_in, 'maxIter',       200);
+    opts.mu            = local_getopt(opts_in, 'mu',            1.0);
+    opts.stabilization = local_getopt(opts_in, 'stabilization', 'off');
+    opts.a1            = local_getopt(opts_in, 'a1',            1.0);
+    opts.a2            = local_getopt(opts_in, 'a2',            1.0);
+    opts.seed          = local_getopt(opts_in, 'seed',          []);
+    opts.whiten_solver = local_getopt(opts_in, 'whiten_solver', 'svd');
+    opts.verbose       = local_getopt(opts_in, 'verbose',       0);
 
     opts.mu = max(min(opts.mu, 1.0), eps0); % clamp to (0,1]
 
@@ -295,9 +300,6 @@ function W = local_sym_decor(W, eps0)
     W = (E * diag(1 ./ sqrt(d + eps0)) * E') * W;
 end
 
-%% ============================================================
-% Safe option getter
-%% ============================================================
 function v = local_getopt(S, field, defaultVal)
     if isfield(S, field) && ~isempty(S.(field))
         v = S.(field);

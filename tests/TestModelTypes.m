@@ -574,7 +574,9 @@ Yhat = aPC_Predict(X, results, ModelOptsOut, ReduceModel);
 
 verifyEqual(testCase, lower(results.ModelType), 'geapck');
 verifyFalse(testCase, isempty(ReduceModel));
-verifySize(testCase, dataOut.dY_model, [N, 2]);
+verifyEqual(testCase, size(dataOut.dY_model, 1), N);
+verifyEqual(testCase, size(dataOut.dY_model, 2), ReduceModel.params.ncomp_used);
+verifyLessThanOrEqual(testCase, ReduceModel.params.ncomp_used, ModelOpts.red_dim);
 verifySize(testCase, Yhat, [N, 1]);
 end
 
@@ -597,6 +599,477 @@ ModelOpts.GradientMode = 'provided';
 
 verifyError(testCase, @() aPC_PrepareModelGradients(data, map_U, ReduceModel, ModelOpts), ...
     'aPC:UnsupportedGEReduction');
+end
+
+function testPrepareModelGradientsAllowsOnlyPrecomputedUGradient(testCase)
+data = struct();
+data.X_train = [1 2 3; 4 5 6];
+data.dYdU_train = [0.11 0.22 0.33; 0.44 0.55 0.66];
+
+map_U = struct();
+map_U.nonConstIdx = [true true true];
+map_U.sigma = [2 3 4];
+
+ModelOpts = struct();
+ModelOpts.GradientMode = 'provided';
+
+[dY_model, dYdX] = aPC_PrepareModelGradients(data, map_U, [], ModelOpts);
+
+verifyEqual(testCase, dY_model, data.dYdU_train, 'AbsTol', 1e-12);
+verifyTrue(testCase, isempty(dYdX));
+end
+
+function testSPCAHSICModelInfoDoesNotStoreKy(testCase)
+U = rand(16, 4);
+Y = sin(U(:,1)) + U(:,2).^2;
+
+[~, ReduceModel] = aPC_dimReduction_spca_hsic(U, Y, 2);
+
+verifyTrue(testCase, isfield(ReduceModel, 'info'));
+verifyFalse(testCase, isfield(ReduceModel.info, 'Ky'));
+end
+
+function testGEPLSReductionRequiresGradients(testCase)
+data = struct();
+data.X_train = rand(8, 3);
+data.Y_train = rand(8, 1);
+
+ModelOpts = struct();
+ModelOpts.Order = 2;
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.ModelType = 'apc';
+ModelOpts.ReductionMethod = 'gepls';
+ModelOpts.red_dim = 2;
+ModelOpts.GradientMode = 'provided';
+
+verifyError(testCase, @() aPC_Train(data, ModelOpts), 'aPC:MissingProvidedGradient');
+end
+
+function testASPLSReductionRequiresGradients(testCase)
+data = struct();
+data.X_train = rand(8, 3);
+data.Y_train = rand(8, 1);
+
+ModelOpts = struct();
+ModelOpts.Order = 2;
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.ModelType = 'apc';
+ModelOpts.ReductionMethod = 'as_pls';
+ModelOpts.red_dim = 2;
+ModelOpts.GradientMode = 'provided';
+
+verifyError(testCase, @() aPC_Train(data, ModelOpts), 'aPC:MissingProvidedGradient');
+end
+
+function testASReductionRequiresGradients(testCase)
+data = struct();
+data.X_train = rand(8, 3);
+data.Y_train = rand(8, 1);
+
+ModelOpts = struct();
+ModelOpts.Order = 2;
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.ModelType = 'apc';
+ModelOpts.ReductionMethod = 'as';
+ModelOpts.red_dim = 2;
+ModelOpts.GradientMode = 'provided';
+
+verifyError(testCase, @() aPC_Train(data, ModelOpts), 'aPC:MissingProvidedGradient');
+end
+
+function testSASReductionRequiresGradients(testCase)
+data = struct();
+data.X_train = rand(8, 3);
+data.Y_train = rand(8, 1);
+
+ModelOpts = struct();
+ModelOpts.Order = 2;
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.ModelType = 'apc';
+ModelOpts.ReductionMethod = 'sas';
+ModelOpts.red_dim = 2;
+ModelOpts.GradientMode = 'provided';
+
+verifyError(testCase, @() aPC_Train(data, ModelOpts), 'aPC:MissingProvidedGradient');
+end
+
+function testSGSReductionRequiresGradients(testCase)
+data = struct();
+data.X_train = rand(8, 3);
+data.Y_train = rand(8, 1);
+
+ModelOpts = struct();
+ModelOpts.Order = 2;
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.ModelType = 'apc';
+ModelOpts.ReductionMethod = 'sgs';
+ModelOpts.red_dim = 2;
+ModelOpts.GradientMode = 'provided';
+
+verifyError(testCase, @() aPC_Train(data, ModelOpts), 'aPC:MissingProvidedGradient');
+end
+
+function testGEAPCKSupportsGEPLSGradientPropagation(testCase)
+N = 18;
+X = rand(N, 3) * 2 - 1;
+Y = sin(X(:,1)) + 0.5 * X(:,2).^2 - 0.2 * X(:,3);
+dYdX = [cos(X(:,1)), X(:,2), -0.2 * ones(N, 1)];
+
+data = struct();
+data.X_train = X;
+data.Y_train = Y;
+data.dYdX_train = dYdX;
+
+ModelOpts = struct();
+ModelOpts.Order = 3;
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.ModelType = 'geapck';
+ModelOpts.PCKType = 'optimal';
+ModelOpts.GradientMode = 'provided';
+ModelOpts.ReductionMethod = 'gepls';
+ModelOpts.red_dim = 2;
+ModelOpts.Parallel = 0;
+ModelOpts.KrigingOpts.optimize_theta = false;
+ModelOpts.KrigingOpts.theta0 = [0.8, 1.2];
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.2];
+
+[results, ModelOptsOut, dataOut, ReduceModel] = aPC_Train(data, ModelOpts);
+Yhat = aPC_Predict(X, results, ModelOptsOut, ReduceModel);
+
+verifyEqual(testCase, lower(results.ModelType), 'geapck');
+verifyEqual(testCase, lower(ReduceModel.method), 'gepls');
+verifySize(testCase, dataOut.dY_model, [N, 2]);
+verifySize(testCase, Yhat, [N, 1]);
+end
+
+function testGEAPCKSupportsASPLSGradientPropagation(testCase)
+N = 18;
+X = rand(N, 3) * 2 - 1;
+Y = sin(X(:,1)) + 0.5 * X(:,2).^2 - 0.2 * X(:,3);
+dYdX = [cos(X(:,1)), X(:,2), -0.2 * ones(N, 1)];
+
+data = struct();
+data.X_train = X;
+data.Y_train = Y;
+data.dYdX_train = dYdX;
+
+ModelOpts = struct();
+ModelOpts.Order = 3;
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.ModelType = 'geapck';
+ModelOpts.PCKType = 'optimal';
+ModelOpts.GradientMode = 'provided';
+ModelOpts.ReductionMethod = 'as_pls';
+ModelOpts.red_dim = 2;
+ModelOpts.as_pls_opts = struct('as_dim', 3);
+ModelOpts.Parallel = 0;
+ModelOpts.KrigingOpts.optimize_theta = false;
+ModelOpts.KrigingOpts.theta0 = [0.8, 1.2];
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.2];
+
+[results, ModelOptsOut, dataOut, ReduceModel] = aPC_Train(data, ModelOpts);
+Yhat = aPC_Predict(X, results, ModelOptsOut, ReduceModel);
+
+verifyEqual(testCase, lower(results.ModelType), 'geapck');
+verifyEqual(testCase, lower(ReduceModel.method), 'as_pls');
+verifySize(testCase, dataOut.dY_model, [N, 2]);
+verifySize(testCase, Yhat, [N, 1]);
+end
+
+function testGEAPCKSupportsASGradientPropagation(testCase)
+N = 18;
+X = rand(N, 3) * 2 - 1;
+Y = sin(X(:,1)) + 0.5 * X(:,2).^2 - 0.2 * X(:,3);
+dYdX = [cos(X(:,1)), X(:,2), -0.2 * ones(N, 1)];
+
+data = struct();
+data.X_train = X;
+data.Y_train = Y;
+data.dYdX_train = dYdX;
+
+ModelOpts = struct();
+ModelOpts.Order = 3;
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.ModelType = 'geapck';
+ModelOpts.PCKType = 'optimal';
+ModelOpts.GradientMode = 'provided';
+ModelOpts.ReductionMethod = 'as';
+ModelOpts.red_dim = 2;
+ModelOpts.Parallel = 0;
+ModelOpts.KrigingOpts.optimize_theta = false;
+ModelOpts.KrigingOpts.theta0 = [0.8, 1.2];
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.2];
+
+[results, ModelOptsOut, dataOut, ReduceModel] = aPC_Train(data, ModelOpts);
+Yhat = aPC_Predict(X, results, ModelOptsOut, ReduceModel);
+
+verifyEqual(testCase, lower(results.ModelType), 'geapck');
+verifyEqual(testCase, lower(ReduceModel.method), 'as');
+verifyFalse(testCase, isfield(ReduceModel, 'info'));
+verifySize(testCase, dataOut.dY_model, [N, 2]);
+verifySize(testCase, Yhat, [N, 1]);
+end
+
+function testASReductionStandaloneDoesNotRequireModelOptsOrInfo(testCase)
+U = rand(10, 4);
+dYdU = rand(10, 4);
+
+[X_red, ReduceModel] = aPC_dimReduction_as(U, dYdU, 2);
+
+verifySize(testCase, X_red, [10, 2]);
+verifyEqual(testCase, lower(ReduceModel.method), 'as');
+verifyFalse(testCase, isfield(ReduceModel, 'info'));
+verifyTrue(testCase, isa(ReduceModel.transform, 'function_handle'));
+end
+
+function testGEAPCKSupportsSASGradientPropagation(testCase)
+N = 18;
+X = rand(N, 3) * 2 - 1;
+Y = sin(X(:,1)) + 0.5 * X(:,2).^2 - 0.2 * X(:,3);
+dYdX = [cos(X(:,1)), X(:,2), -0.2 * ones(N, 1)];
+
+data = struct();
+data.X_train = X;
+data.Y_train = Y;
+data.dYdX_train = dYdX;
+
+ModelOpts = struct();
+ModelOpts.Order = 3;
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.ModelType = 'geapck';
+ModelOpts.PCKType = 'optimal';
+ModelOpts.GradientMode = 'provided';
+ModelOpts.ReductionMethod = 'sas';
+ModelOpts.red_dim = 2;
+ModelOpts.Parallel = 0;
+ModelOpts.KrigingOpts.optimize_theta = false;
+ModelOpts.KrigingOpts.theta0 = [0.8, 1.2];
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.2];
+
+[results, ModelOptsOut, dataOut, ReduceModel] = aPC_Train(data, ModelOpts);
+Yhat = aPC_Predict(X, results, ModelOptsOut, ReduceModel);
+
+verifyEqual(testCase, lower(results.ModelType), 'geapck');
+verifyEqual(testCase, lower(ReduceModel.method), 'sas');
+verifyEqual(testCase, size(dataOut.dY_model, 1), N);
+verifyEqual(testCase, size(dataOut.dY_model, 2), size(ReduceModel.params.A, 2));
+verifyEqual(testCase, size(ReduceModel.params.A, 2), ModelOpts.red_dim);
+verifySize(testCase, Yhat, [N, 1]);
+end
+
+function testGEAPCKSupportsSGSGradientPropagation(testCase)
+N = 18;
+X = rand(N, 3) * 2 - 1;
+Y = sin(X(:,1)) + 0.5 * X(:,2).^2 - 0.2 * X(:,3);
+dYdX = [cos(X(:,1)), X(:,2), -0.2 * ones(N, 1)];
+
+data = struct();
+data.X_train = X;
+data.Y_train = Y;
+data.dYdX_train = dYdX;
+
+ModelOpts = struct();
+ModelOpts.Order = 3;
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.ModelType = 'geapck';
+ModelOpts.PCKType = 'optimal';
+ModelOpts.GradientMode = 'provided';
+ModelOpts.ReductionMethod = 'sgs';
+ModelOpts.red_dim = 2;
+ModelOpts.Parallel = 0;
+ModelOpts.KrigingOpts.optimize_theta = false;
+ModelOpts.KrigingOpts.theta0 = [0.8, 1.2];
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.2];
+
+[results, ModelOptsOut, dataOut, ReduceModel] = aPC_Train(data, ModelOpts);
+Yhat = aPC_Predict(X, results, ModelOptsOut, ReduceModel);
+
+verifyEqual(testCase, lower(results.ModelType), 'geapck');
+verifyEqual(testCase, lower(ReduceModel.method), 'sgs');
+verifySize(testCase, dataOut.dY_model, [N, 2]);
+verifySize(testCase, Yhat, [N, 1]);
+end
+
+function testGEPLSReductionUsesNestedOpts(testCase)
+N = 18;
+X = rand(N, 3) * 2 - 1;
+Y = sin(X(:,1)) + 0.5 * X(:,2).^2 - 0.2 * X(:,3);
+dYdX = [cos(X(:,1)), X(:,2), -0.2 * ones(N, 1)];
+
+data = struct();
+data.X_train = X;
+data.Y_train = Y;
+data.dYdX_train = dYdX;
+
+ModelOpts = struct();
+ModelOpts.Order = 3;
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.ModelType = 'geapck';
+ModelOpts.PCKType = 'optimal';
+ModelOpts.GradientMode = 'provided';
+ModelOpts.ReductionMethod = 'gepls';
+ModelOpts.red_dim = 2;
+ModelOpts.gepls_opts = struct('gamma', 2.5);
+ModelOpts.Parallel = 0;
+ModelOpts.KrigingOpts.optimize_theta = false;
+ModelOpts.KrigingOpts.theta0 = [0.8, 1.2];
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.2];
+
+[~, ~, ~, ReduceModel] = aPC_Train(data, ModelOpts);
+verifyEqual(testCase, ReduceModel.params.gamma, 2.5, 'AbsTol', 1e-12);
+end
+
+function testASPLSReductionUsesNestedOpts(testCase)
+N = 18;
+X = rand(N, 3) * 2 - 1;
+Y = sin(X(:,1)) + 0.5 * X(:,2).^2 - 0.2 * X(:,3);
+dYdX = [cos(X(:,1)), X(:,2), -0.2 * ones(N, 1)];
+
+data = struct();
+data.X_train = X;
+data.Y_train = Y;
+data.dYdX_train = dYdX;
+
+ModelOpts = struct();
+ModelOpts.Order = 3;
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.ModelType = 'geapck';
+ModelOpts.PCKType = 'optimal';
+ModelOpts.GradientMode = 'provided';
+ModelOpts.ReductionMethod = 'as_pls';
+ModelOpts.red_dim = 2;
+ModelOpts.as_pls_opts = struct('as_dim', 2);
+ModelOpts.Parallel = 0;
+ModelOpts.KrigingOpts.optimize_theta = false;
+ModelOpts.KrigingOpts.theta0 = [0.8, 1.2];
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.2];
+
+[~, ~, ~, ReduceModel] = aPC_Train(data, ModelOpts);
+verifyEqual(testCase, ReduceModel.params.as_dim, 2);
+end
+
+function testSASReductionUsesNestedOpts(testCase)
+N = 18;
+X = rand(N, 3) * 2 - 1;
+Y = sin(X(:,1)) + 0.5 * X(:,2).^2 - 0.2 * X(:,3);
+dYdX = [cos(X(:,1)), X(:,2), -0.2 * ones(N, 1)];
+
+data = struct();
+data.X_train = X;
+data.Y_train = Y;
+data.dYdX_train = dYdX;
+
+ModelOpts = struct();
+ModelOpts.Order = 3;
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.ModelType = 'geapck';
+ModelOpts.PCKType = 'optimal';
+ModelOpts.GradientMode = 'provided';
+ModelOpts.ReductionMethod = 'sas';
+ModelOpts.red_dim = 2;
+ModelOpts.sas_opts = struct('response_power', 3.0, 'weight_eps', 1e-6);
+ModelOpts.Parallel = 0;
+ModelOpts.KrigingOpts.optimize_theta = false;
+ModelOpts.KrigingOpts.theta0 = [0.8, 1.2];
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.2];
+
+[~, ~, ~, ReduceModel] = aPC_Train(data, ModelOpts);
+verifyEqual(testCase, ReduceModel.params.response_power, 3.0, 'AbsTol', 1e-12);
+verifyEqual(testCase, ReduceModel.params.weight_eps, 1e-6, 'AbsTol', 1e-12);
+verifyEqual(testCase, lower(ReduceModel.params.weight_method), 'zpower');
+verifyEqual(testCase, size(ReduceModel.params.A, 2), ModelOpts.red_dim);
+end
+
+function testSASReductionSupportsDensityWeightMethod(testCase)
+N = 18;
+X = rand(N, 3) * 2 - 1;
+Y = sin(X(:,1)) + 0.5 * X(:,2).^2 - 0.2 * X(:,3);
+dYdX = [cos(X(:,1)), X(:,2), -0.2 * ones(N, 1)];
+
+data = struct();
+data.X_train = X;
+data.Y_train = Y;
+data.dYdX_train = dYdX;
+
+ModelOpts = struct();
+ModelOpts.Order = 3;
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.ModelType = 'geapck';
+ModelOpts.PCKType = 'optimal';
+ModelOpts.GradientMode = 'provided';
+ModelOpts.ReductionMethod = 'sas';
+ModelOpts.red_dim = 2;
+ModelOpts.sas_opts = struct('weight_method', 'density', 'gamma', 0.7, 'sigma_y', 0.25);
+ModelOpts.Parallel = 0;
+ModelOpts.KrigingOpts.optimize_theta = false;
+ModelOpts.KrigingOpts.theta0 = [0.8, 1.2];
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.2];
+
+[~, ~, ~, ReduceModel] = aPC_Train(data, ModelOpts);
+
+verifyEqual(testCase, lower(ReduceModel.params.weight_method), 'density');
+verifyEqual(testCase, ReduceModel.params.gamma, 0.7, 'AbsTol', 1e-12);
+verifyGreaterThanOrEqual(testCase, min(ReduceModel.params.weights), 1.0 - 1e-12);
+verifyLessThanOrEqual(testCase, max(ReduceModel.params.weights), 1.7 + 1e-12);
+end
+
+function testSGSReductionUsesNestedOpts(testCase)
+N = 18;
+X = rand(N, 3) * 2 - 1;
+Y = sin(X(:,1)) + 0.5 * X(:,2).^2 - 0.2 * X(:,3);
+dYdX = [cos(X(:,1)), X(:,2), -0.2 * ones(N, 1)];
+
+data = struct();
+data.X_train = X;
+data.Y_train = Y;
+data.dYdX_train = dYdX;
+
+ModelOpts = struct();
+ModelOpts.Order = 3;
+ModelOpts.qnorm = 1.0;
+ModelOpts.aPC_Method = 'stieltjes';
+ModelOpts.RegressionMethod = 'lars';
+ModelOpts.ModelType = 'geapck';
+ModelOpts.PCKType = 'optimal';
+ModelOpts.GradientMode = 'provided';
+ModelOpts.ReductionMethod = 'sgs';
+ModelOpts.red_dim = 2;
+ModelOpts.sgs_opts = struct('alpha', 0.9);
+ModelOpts.Parallel = 0;
+ModelOpts.KrigingOpts.optimize_theta = false;
+ModelOpts.KrigingOpts.theta0 = [0.8, 1.2];
+ModelOpts.KrigingOpts.trend_range = [0.2, 0.2];
+
+[~, ~, ~, ReduceModel] = aPC_Train(data, ModelOpts);
+verifyEqual(testCase, ReduceModel.params.alpha, 0.9, 'AbsTol', 1e-12);
 end
 
 function testSearchFieldsDoNotIncludeTheta0(testCase)
