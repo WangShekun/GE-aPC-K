@@ -9,20 +9,20 @@ uqlab
 ModelOpts = struct();
 
 % === 基础多项式设置 ===
-ModelOpts.Order = [3];                  % 多项式总阶数 p；可设为标量或搜索向量
+ModelOpts.Order = [8];                  % 多项式总阶数 p；可设为标量或搜索向量
 ModelOpts.qnorm = [0.9];                % q-norm 截断参数；越小越稀疏
 ModelOpts.aPC_Method = 'stieltjes';     % 一维 aPC 构造方法：'2012' | '2018' | 'stieltjes'
 ModelOpts.RegressionMethod = 'lars';    % APC trend 的回归器：通常用 'lars'
 ModelOpts.TrendBuilder = 'lars';
 % === 模型选择设置 ===
 ModelOpts.ModelType = 'apck';           % 模型类型：'apc' | 'apck' | 'geapck'
-ModelOpts.PCKType = 'sequential';          % PCK 策略：'sequential' | 'optimal'
+ModelOpts.PCKType = 'optimal';          % PCK 策略：'sequential' | 'optimal'
 % ModelOpts.GradientMode = 'provided';  % GEAPCK 梯度来源：'provided' | 'finite-difference' | 'auto'
 ModelOpts.Parallel = 0;                 % 是否并行搜索候选配置：0/1
 
 % === 降维设置 ===
-ModelOpts.ReductionMethod = 'as';    % 降维方法：'pls' | 'pca' | 'kpca' | 'mcp' | 'ica' | 'rp' | ...
-ModelOpts.red_dim = [20];              % 降维后的目标维数；可设为标量或搜索向量
+% ModelOpts.ReductionMethod = 'as';    % 降维方法：'pls' | 'pca' | 'kpca' | 'mcp' | 'ica' | 'rp' | ...
+% ModelOpts.red_dim = [20];              % 降维后的目标维数；可设为标量或搜索向量
 
 % === KPCA / SKPCA 输入核设置 ===
 % ModelOpts.kpca_opts.kernel_type = {'gaussian'};  % KPCA 输入核类型
@@ -68,7 +68,7 @@ ModelOpts.red_dim = [20];              % 降维后的目标维数；可设为标
 % ModelOpts.rp_opts.seed = 80;                % 随机种子
 
 % === sas设置===
-ModelOpts.sas_opts.weight_method = 'zpower';
+% ModelOpts.sas_opts.weight_method = 'zpower';
 
 % === as_pls设置===
 % ModelOpts.as_pls_opts.as_dim = 25;
@@ -93,14 +93,12 @@ ModelOpts.KrigingOpts.trend_range = [0.8]; % trend 路径比例区间
 % ModelOpts.KrigingOpts.early_stop_patience = 3;
 ModelOpts.KrigingOpts.optimize_theta = true;  % 是否优化 Kriging 长度尺度
 ModelOpts.KrigingOpts.DisplayProgress = true;% 是否显示 sequential/optimal 的内部进度
-ModelOpts.KrigingOpts.use_objective_gradient = 0;
-
 % === GE 数值梯度回退设置 ===
 % ModelOpts.FDOpts.type = 'forward';          % 差分类型：'forward' | 'central'
 % ModelOpts.FDOpts.step = 1e-6;               % 相对步长，用于自动数值梯度
 
 % === 基准函数选择（含梯度） ===
-Benchmark.Name = 'dim200';          % 'ishigami' | 'wingweight' | 'morris10'
+Benchmark.Name = 'ishigami';          % 'ishigami' | 'wingweight' | 'morris10'
 Benchmark.N_train = 200;
 Benchmark.N_val = 2000;
 Benchmark.GradientSource = 'finite-difference';  % 'provided' | 'finite-difference' | 'auto'

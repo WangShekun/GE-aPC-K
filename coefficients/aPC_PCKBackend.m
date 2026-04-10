@@ -20,14 +20,28 @@ function results = aPC_PCKBackend(Psi, data_model, ModelOpts, basis_info)
     KrigingOpts = localSetDef(KrigingOpts, 'theta_lb', 1e-3);
     KrigingOpts = localSetDef(KrigingOpts, 'theta_ub', 1e2);
     KrigingOpts = localSetDef(KrigingOpts, 'optimize_theta', false);
-    KrigingOpts = localSetDef(KrigingOpts, 'use_objective_gradient', true);
     KrigingOpts = localSetDef(KrigingOpts, 'DisplayProgress', false);
     KrigingOpts = localSetDef(KrigingOpts, 'early_stop_patience', inf);
+    KrigingOpts = localSetDef(KrigingOpts, 'theta_strategy', 'direct');
+    KrigingOpts = localSetDef(KrigingOpts, 'theta_refine_max_iterations', 5);
+    KrigingOpts = localSetDef(KrigingOpts, 'theta_refine_max_function_evaluations', 20);
 
     early_stop_patience = KrigingOpts.early_stop_patience;
     if ~isscalar(early_stop_patience) || isnan(early_stop_patience) || early_stop_patience < 1
         error('aPC:InvalidEarlyStopPatience', ...
             'KrigingOpts.early_stop_patience must be a scalar >= 1 or Inf.');
+    end
+
+    if ~isscalar(KrigingOpts.theta_refine_max_iterations) || ...
+            ~isfinite(KrigingOpts.theta_refine_max_iterations) || KrigingOpts.theta_refine_max_iterations < 1
+        error('aPC:InvalidThetaRefineIterations', ...
+            'KrigingOpts.theta_refine_max_iterations must be a finite scalar >= 1.');
+    end
+
+    if ~isscalar(KrigingOpts.theta_refine_max_function_evaluations) || ...
+            ~isfinite(KrigingOpts.theta_refine_max_function_evaluations) || KrigingOpts.theta_refine_max_function_evaluations < 1
+        error('aPC:InvalidThetaRefineEvaluations', ...
+            'KrigingOpts.theta_refine_max_function_evaluations must be a finite scalar >= 1.');
     end
 
     parallel_scope = 'serial';
@@ -180,9 +194,7 @@ end
 function model = localFitOne(F, dF, Y, U, G, KrigingOpts, theta_init, use_ge)
     % Fit one PCK model for a fixed trend matrix F.
     [~, d] = size(U);
-    use_objective_gradient = KrigingOpts.optimize_theta && KrigingOpts.use_objective_gradient && ...
-        localSupportsObjectiveGradient(use_ge, KrigingOpts.corr);
-
+    theta_strategy = localResolveThetaStrategy(KrigingOpts, use_ge);
     if isempty(theta_init)
         theta0 = KrigingOpts.theta0;
     else
@@ -211,73 +223,102 @@ function model = localFitOne(F, dF, Y, U, G, KrigingOpts, theta_init, use_ge)
         z0 = log(theta0);
         zlb = log(theta_lb);
         zub = log(theta_ub);
-        opts = optimoptions('fmincon', ...
-            'Algorithm', 'sqp', ...
-            'Display', 'off', ...
-            'MaxIterations', 80, ...
-            'MaxFunctionEvaluations', 300);
-        if use_objective_gradient
-            opts = optimoptions(opts, 'SpecifyObjectiveGradient', true);
-            [zopt, ~, exitflag, output] = fmincon(@(z) localNLLWithGradient(z, F, dF, Y, U, G, KrigingOpts, use_ge), ...
-                z0, [], [], [], [], zlb, zub, [], opts);
-        else
-            [zopt, ~, exitflag, output] = fmincon(@(z) localNLLOnly(exp(z), F, dF, Y, U, G, KrigingOpts, use_ge), ...
-                z0, [], [], [], [], zlb, zub, [], opts);
+        theta_stage1 = [];
+        theta_stage1_exitflag = [];
+        theta_stage1_output = struct();
+        theta_refine_exitflag = [];
+        theta_refine_output = struct();
+
+        switch theta_strategy
+            case 'direct'
+                [theta, exitflag, output] = localOptimizeTheta( ...
+                    z0, zlb, zub, F, dF, Y, U, G, KrigingOpts, use_ge, ...
+                    80, 300);
+
+            case 'apck_surrogate'
+                [theta_stage1, theta_stage1_exitflag, theta_stage1_output] = localOptimizeTheta( ...
+                    z0, zlb, zub, F, [], Y, U, [], KrigingOpts, false, ...
+                    80, 300);
+                theta = theta_stage1;
+                exitflag = theta_stage1_exitflag;
+                output = theta_stage1_output;
+
+            case 'apck_surrogate_refine'
+                [theta_stage1, theta_stage1_exitflag, theta_stage1_output] = localOptimizeTheta( ...
+                    z0, zlb, zub, F, [], Y, U, [], KrigingOpts, false, ...
+                    80, 300);
+                theta_refine0 = theta_stage1;
+                if theta_stage1_exitflag <= 0 || any(~isfinite(theta_stage1))
+                    warning('aPC:SurrogateStage1Failed', ...
+                        'Stage-1 APCK surrogate theta optimization exited with flag %d; refining from theta0 instead.', ...
+                        theta_stage1_exitflag);
+                    theta_refine0 = theta0;
+                end
+                z1 = log(min(max(theta_refine0, theta_lb), theta_ub));
+                [theta, theta_refine_exitflag, theta_refine_output] = localOptimizeTheta( ...
+                    z1, zlb, zub, F, dF, Y, U, G, KrigingOpts, use_ge, ...
+                    KrigingOpts.theta_refine_max_iterations, ...
+                    KrigingOpts.theta_refine_max_function_evaluations);
+                exitflag = theta_refine_exitflag;
+                output = theta_refine_output;
+
+            otherwise
+                error('aPC:UnsupportedThetaStrategy', 'Unsupported theta strategy: %s', theta_strategy);
         end
-        theta = exp(zopt);
+
         theta_optimizer = 'fmincon';
     else
         theta = theta0;
         theta_optimizer = 'fixed';
         exitflag = [];
         output = struct();
+        theta_stage1 = [];
+        theta_stage1_exitflag = [];
+        theta_stage1_output = struct();
+        theta_refine_exitflag = [];
+        theta_refine_output = struct();
     end
 
     theta = min(max(theta, theta_lb), theta_ub);
     model = localBuildModel(theta, F, dF, Y, U, G, KrigingOpts, use_ge);
     model.theta = theta;
+    model.theta_strategy = theta_strategy;
     model.theta_init_used = theta0;
+    model.theta_stage1 = theta_stage1;
+    model.theta_stage1_optimizer = localStage1Optimizer(theta_stage1, KrigingOpts.optimize_theta, theta_strategy);
+    model.theta_stage1_exitflag = theta_stage1_exitflag;
+    model.theta_stage1_opt_output = theta_stage1_output;
+    model.theta_refine_exitflag = theta_refine_exitflag;
+    model.theta_refine_opt_output = theta_refine_output;
     model.theta_optimizer = theta_optimizer;
-    model.theta_uses_objective_gradient = use_objective_gradient;
     model.theta_exitflag = exitflag;
     model.theta_opt_output = output;
 end
 
-function nll = localNLLOnly(theta, F, dF, Y, U, G, KrigingOpts, use_ge)
-    [nll, ~] = localEvalThetaCore(theta, F, dF, Y, U, G, KrigingOpts, use_ge);
+function [theta, exitflag, output] = localOptimizeTheta(z0, zlb, zub, F, dF, Y, U, G, KrigingOpts, use_ge, max_iterations, max_function_evaluations)
+    opts = optimoptions('fmincon', ...
+        'Algorithm', 'sqp', ...
+        'Display', 'off', ...
+        'MaxIterations', max_iterations, ...
+        'MaxFunctionEvaluations', max_function_evaluations);
+
+    [zopt, ~, exitflag, output] = fmincon(@(z) localNLLOnly(exp(z), F, dF, Y, U, G, KrigingOpts, use_ge), ...
+        z0, [], [], [], [], zlb, zub, [], opts);
+
+    theta = exp(zopt);
 end
 
-function [nll, grad_z] = localNLLWithGradient(z, F, dF, Y, U, G, KrigingOpts, use_ge)
-    theta = exp(z(:)');
-    [nll, core] = localEvalThetaCore(theta, F, dF, Y, U, G, KrigingOpts, use_ge);
-
-    if core.chol_failed
-        grad_z = zeros(size(z));
+function optimizer = localStage1Optimizer(theta_stage1, optimize_theta, theta_strategy)
+    if ~optimize_theta || isempty(theta_stage1) || strcmp(theta_strategy, 'direct')
+        optimizer = '';
         return;
     end
 
-    Kinv = core.L' \ (core.L \ eye(size(core.L)));
-    grad_theta = zeros(1, numel(theta));
+    optimizer = 'fmincon';
+end
 
-    if use_ge
-        ge_ctx = localGEGaussianThetaDerivativeContext(U, theta);
-        for i = 1:numel(theta)
-            dKi = localGEGaussianThetaDerivativeSlice(ge_ctx, i);
-            trace_term = sum(sum(Kinv .* dKi));
-            quad_term = core.alpha' * dKi * core.alpha;
-            grad_theta(i) = trace_term - quad_term / core.sigma2;
-        end
-    else
-        dK = localAPCKCorrThetaDerivatives(U, theta, KrigingOpts.corr);
-        for i = 1:numel(theta)
-            dKi = dK(:, :, i);
-            trace_term = sum(sum(Kinv .* dKi));
-            quad_term = core.alpha' * dKi * core.alpha;
-            grad_theta(i) = trace_term - quad_term / core.sigma2;
-        end
-    end
-
-    grad_z = reshape(grad_theta .* theta, size(z));
+function nll = localNLLOnly(theta, F, dF, Y, U, G, KrigingOpts, use_ge)
+    [nll, ~] = localEvalThetaCore(theta, F, dF, Y, U, G, KrigingOpts, use_ge);
 end
 
 function model = localBuildModel(theta, F, dF, Y, U, G, KrigingOpts, use_ge)
@@ -373,99 +414,28 @@ function core = localFallbackCore(F, Y, U, use_ge)
     core.chol_failed = true;
 end
 
-function dK = localAPCKCorrThetaDerivatives(U, theta, corr_type)
-    delta = reshape(U, size(U, 1), 1, []) - reshape(U, 1, size(U, 1), []);
-    theta3 = reshape(theta(:)'.^3, 1, 1, []);
-    theta2 = reshape(theta(:)'.^2, 1, 1, []);
 
-    switch lower(corr_type)
-        case 'gaussian'
-            q = sum((delta ./ reshape(theta(:)', 1, 1, [])).^2, 3);
-            K = exp(-0.5 * q);
-            dK = K .* (delta.^2 ./ theta3);
-        case 'exponential'
-            K = exp(-sum(abs(delta) ./ reshape(theta(:)', 1, 1, []), 3));
-            dK = K .* (abs(delta) ./ theta2);
-        case 'matern32'
-            a = sqrt(3);
-            r = sqrt(sum((delta ./ reshape(theta(:)', 1, 1, [])).^2, 3));
-            E = exp(-a * r);
-            dK = 3 * E .* (delta.^2 ./ theta3);
-        otherwise
-            error('aPC:UnsupportedCorrelation', 'Unsupported corr type: %s', corr_type);
+function theta_strategy = localResolveThetaStrategy(KrigingOpts, use_ge)
+    theta_strategy = 'direct';
+    if isfield(KrigingOpts, 'theta_strategy') && ~isempty(KrigingOpts.theta_strategy)
+        theta_strategy = lower(strtrim(KrigingOpts.theta_strategy));
     end
 
-    for i = 1:size(dK, 3)
-        dKi = dK(:, :, i);
-        dKi = (dKi + dKi') * 0.5;
-        dKi(1:size(dKi, 1) + 1:end) = 0;
-        dK(:, :, i) = dKi;
-    end
-end
-
-function tf = localSupportsObjectiveGradient(use_ge, corr_type)
     if ~use_ge
-        tf = true;
+        if ~strcmp(theta_strategy, 'direct')
+            warning('aPC:ThetaStrategyIgnored', ...
+                'theta_strategy ''%s'' is only supported for GEAPCK; falling back to ''direct''.', ...
+                theta_strategy);
+        end
+        theta_strategy = 'direct';
         return;
     end
 
-    tf = strcmpi(corr_type, 'gaussian');
-end
-
-function ctx = localGEGaussianThetaDerivativeContext(U, theta)
-    N = size(U, 1);
-    d = size(U, 2);
-    delta = reshape(U, N, 1, []) - reshape(U, 1, N, []);
-    theta = theta(:)';
-    q = sum((delta ./ reshape(theta, 1, 1, [])).^2, 3);
-
-    ctx = struct();
-    ctx.N = N;
-    ctx.d = d;
-    ctx.nobs = N * (d + 1);
-    ctx.delta = delta;
-    ctx.theta2 = theta.^2;
-    ctx.theta3 = theta.^3;
-    ctx.Kff = exp(-0.5 * q);
-end
-
-function dKi = localGEGaussianThetaDerivativeSlice(ctx, i)
-    N = ctx.N;
-    d = ctx.d;
-    dKi = zeros(ctx.nobs, ctx.nobs);
-    dKff_i = ctx.Kff .* (ctx.delta(:, :, i).^2 / ctx.theta3(i));
-    dKi(1:N, 1:N) = dKff_i;
-
-    for a = 1:d
-        rows = N + (a - 1) * N + (1:N);
-        base_a = ctx.delta(:, :, a) / ctx.theta2(a);
-        dKfg = base_a .* dKff_i;
-        if i == a
-            dKfg = dKfg - 2 * ctx.Kff .* (ctx.delta(:, :, a) / ctx.theta3(a));
-        end
-        dKi(1:N, rows) = dKfg;
-        dKi(rows, 1:N) = -dKfg;
-
-        for b = 1:d
-            cols = N + (b - 1) * N + (1:N);
-            S = -(ctx.delta(:, :, a) .* ctx.delta(:, :, b)) / (ctx.theta2(a) * ctx.theta2(b));
-            if a == b
-                S = S + 1 / ctx.theta2(a);
-            end
-
-            dS = zeros(N, N);
-            if i == a
-                dS = dS + 2 * (ctx.delta(:, :, a) .* ctx.delta(:, :, b)) / (ctx.theta3(a) * ctx.theta2(b));
-                if a == b
-                    dS = dS - 2 / ctx.theta3(a);
-                end
-            end
-            if i == b
-                dS = dS + 2 * (ctx.delta(:, :, a) .* ctx.delta(:, :, b)) / (ctx.theta2(a) * ctx.theta3(b));
-            end
-
-            dKi(rows, cols) = dS .* ctx.Kff + S .* dKff_i;
-        end
+    switch theta_strategy
+        case {'direct', 'apck_surrogate', 'apck_surrogate_refine'}
+            return;
+        otherwise
+            error('aPC:UnsupportedThetaStrategy', 'Unsupported theta strategy: %s', theta_strategy);
     end
 end
 
