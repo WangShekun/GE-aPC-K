@@ -22,26 +22,11 @@ function results = aPC_PCKBackend(Psi, data_model, ModelOpts, basis_info)
     KrigingOpts = localSetDef(KrigingOpts, 'optimize_theta', false);
     KrigingOpts = localSetDef(KrigingOpts, 'DisplayProgress', false);
     KrigingOpts = localSetDef(KrigingOpts, 'early_stop_patience', inf);
-    KrigingOpts = localSetDef(KrigingOpts, 'theta_strategy', 'direct');
-    KrigingOpts = localSetDef(KrigingOpts, 'theta_refine_max_iterations', 5);
-    KrigingOpts = localSetDef(KrigingOpts, 'theta_refine_max_function_evaluations', 20);
 
     early_stop_patience = KrigingOpts.early_stop_patience;
     if ~isscalar(early_stop_patience) || isnan(early_stop_patience) || early_stop_patience < 1
         error('aPC:InvalidEarlyStopPatience', ...
             'KrigingOpts.early_stop_patience must be a scalar >= 1 or Inf.');
-    end
-
-    if ~isscalar(KrigingOpts.theta_refine_max_iterations) || ...
-            ~isfinite(KrigingOpts.theta_refine_max_iterations) || KrigingOpts.theta_refine_max_iterations < 1
-        error('aPC:InvalidThetaRefineIterations', ...
-            'KrigingOpts.theta_refine_max_iterations must be a finite scalar >= 1.');
-    end
-
-    if ~isscalar(KrigingOpts.theta_refine_max_function_evaluations) || ...
-            ~isfinite(KrigingOpts.theta_refine_max_function_evaluations) || KrigingOpts.theta_refine_max_function_evaluations < 1
-        error('aPC:InvalidThetaRefineEvaluations', ...
-            'KrigingOpts.theta_refine_max_function_evaluations must be a finite scalar >= 1.');
     end
 
     parallel_scope = 'serial';
@@ -194,7 +179,6 @@ end
 function model = localFitOne(F, dF, Y, U, G, KrigingOpts, theta_init, use_ge)
     % Fit one PCK model for a fixed trend matrix F.
     [~, d] = size(U);
-    theta_strategy = localResolveThetaStrategy(KrigingOpts, use_ge);
     if isempty(theta_init)
         theta0 = KrigingOpts.theta0;
     else
@@ -223,48 +207,9 @@ function model = localFitOne(F, dF, Y, U, G, KrigingOpts, theta_init, use_ge)
         z0 = log(theta0);
         zlb = log(theta_lb);
         zub = log(theta_ub);
-        theta_stage1 = [];
-        theta_stage1_exitflag = [];
-        theta_stage1_output = struct();
-        theta_refine_exitflag = [];
-        theta_refine_output = struct();
-
-        switch theta_strategy
-            case 'direct'
-                [theta, exitflag, output] = localOptimizeTheta( ...
-                    z0, zlb, zub, F, dF, Y, U, G, KrigingOpts, use_ge, ...
-                    80, 300);
-
-            case 'apck_surrogate'
-                [theta_stage1, theta_stage1_exitflag, theta_stage1_output] = localOptimizeTheta( ...
-                    z0, zlb, zub, F, [], Y, U, [], KrigingOpts, false, ...
-                    80, 300);
-                theta = theta_stage1;
-                exitflag = theta_stage1_exitflag;
-                output = theta_stage1_output;
-
-            case 'apck_surrogate_refine'
-                [theta_stage1, theta_stage1_exitflag, theta_stage1_output] = localOptimizeTheta( ...
-                    z0, zlb, zub, F, [], Y, U, [], KrigingOpts, false, ...
-                    80, 300);
-                theta_refine0 = theta_stage1;
-                if theta_stage1_exitflag <= 0 || any(~isfinite(theta_stage1))
-                    warning('aPC:SurrogateStage1Failed', ...
-                        'Stage-1 APCK surrogate theta optimization exited with flag %d; refining from theta0 instead.', ...
-                        theta_stage1_exitflag);
-                    theta_refine0 = theta0;
-                end
-                z1 = log(min(max(theta_refine0, theta_lb), theta_ub));
-                [theta, theta_refine_exitflag, theta_refine_output] = localOptimizeTheta( ...
-                    z1, zlb, zub, F, dF, Y, U, G, KrigingOpts, use_ge, ...
-                    KrigingOpts.theta_refine_max_iterations, ...
-                    KrigingOpts.theta_refine_max_function_evaluations);
-                exitflag = theta_refine_exitflag;
-                output = theta_refine_output;
-
-            otherwise
-                error('aPC:UnsupportedThetaStrategy', 'Unsupported theta strategy: %s', theta_strategy);
-        end
+        [theta, exitflag, output] = localOptimizeTheta( ...
+            z0, zlb, zub, F, dF, Y, U, G, KrigingOpts, use_ge, ...
+            80, 300);
 
         theta_optimizer = 'fmincon';
     else
@@ -272,24 +217,12 @@ function model = localFitOne(F, dF, Y, U, G, KrigingOpts, theta_init, use_ge)
         theta_optimizer = 'fixed';
         exitflag = [];
         output = struct();
-        theta_stage1 = [];
-        theta_stage1_exitflag = [];
-        theta_stage1_output = struct();
-        theta_refine_exitflag = [];
-        theta_refine_output = struct();
     end
 
     theta = min(max(theta, theta_lb), theta_ub);
     model = localBuildModel(theta, F, dF, Y, U, G, KrigingOpts, use_ge);
     model.theta = theta;
-    model.theta_strategy = theta_strategy;
     model.theta_init_used = theta0;
-    model.theta_stage1 = theta_stage1;
-    model.theta_stage1_optimizer = localStage1Optimizer(theta_stage1, KrigingOpts.optimize_theta, theta_strategy);
-    model.theta_stage1_exitflag = theta_stage1_exitflag;
-    model.theta_stage1_opt_output = theta_stage1_output;
-    model.theta_refine_exitflag = theta_refine_exitflag;
-    model.theta_refine_opt_output = theta_refine_output;
     model.theta_optimizer = theta_optimizer;
     model.theta_exitflag = exitflag;
     model.theta_opt_output = output;
@@ -306,15 +239,6 @@ function [theta, exitflag, output] = localOptimizeTheta(z0, zlb, zub, F, dF, Y, 
         z0, [], [], [], [], zlb, zub, [], opts);
 
     theta = exp(zopt);
-end
-
-function optimizer = localStage1Optimizer(theta_stage1, optimize_theta, theta_strategy)
-    if ~optimize_theta || isempty(theta_stage1) || strcmp(theta_strategy, 'direct')
-        optimizer = '';
-        return;
-    end
-
-    optimizer = 'fmincon';
 end
 
 function nll = localNLLOnly(theta, F, dF, Y, U, G, KrigingOpts, use_ge)
@@ -414,30 +338,6 @@ function core = localFallbackCore(F, Y, U, use_ge)
     core.chol_failed = true;
 end
 
-
-function theta_strategy = localResolveThetaStrategy(KrigingOpts, use_ge)
-    theta_strategy = 'direct';
-    if isfield(KrigingOpts, 'theta_strategy') && ~isempty(KrigingOpts.theta_strategy)
-        theta_strategy = lower(strtrim(KrigingOpts.theta_strategy));
-    end
-
-    if ~use_ge
-        if ~strcmp(theta_strategy, 'direct')
-            warning('aPC:ThetaStrategyIgnored', ...
-                'theta_strategy ''%s'' is only supported for GEAPCK; falling back to ''direct''.', ...
-                theta_strategy);
-        end
-        theta_strategy = 'direct';
-        return;
-    end
-
-    switch theta_strategy
-        case {'direct', 'apck_surrogate', 'apck_surrogate_refine'}
-            return;
-        otherwise
-            error('aPC:UnsupportedThetaStrategy', 'Unsupported theta strategy: %s', theta_strategy);
-    end
-end
 
 function S = localSetDef(S, field, val)
     if ~isfield(S, field) || isempty(S.(field))

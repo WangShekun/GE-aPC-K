@@ -32,7 +32,7 @@
 **Files:**
 - Modify: `tests/TestModelTypes.m`
 - Modify: `main_compare.m`
-- Modify: `compare_geapck_sequential_theta_strategy_wingweight.m`
+- Modify: legacy GEAPCK compare script (removed)
 - Modify: `README.md`
 
 - [ ] Delete or rewrite tests that mention the removed option.
