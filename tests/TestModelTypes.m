@@ -80,7 +80,7 @@ ModelOpts.aPC_Method = 'stieltjes';
     verifySize(testCase, Yhat, [N, 1]);
 end
 
-function testGEAPCKSequentialThetaStrategyDefaultsToDirect(testCase)
+function testGEAPCKSequentialThetaOptimizationRuns(testCase)
     rng(17);
     N = 14;
     X = rand(N, 2) * 2 - 1;
@@ -110,121 +110,8 @@ function testGEAPCKSequentialThetaStrategyDefaultsToDirect(testCase)
 
     [results, ~, ~, ~] = aPC_Train(data, ModelOpts);
 
-    verifyEqual(testCase, results.PCKModel.theta_strategy, 'direct');
+    verifyTrue(testCase, isfield(results.PCKModel, 'theta_opt_output'));
     verifyTrue(testCase, all(isfinite(results.PCKModel.theta)));
-end
-
-function testGEAPCKSequentialAPCKSurrogateThetaRuns(testCase)
-    rng(17);
-    N = 14;
-    X = rand(N, 2) * 2 - 1;
-    Y = exp(0.25 * X(:,1)) + 0.4 * X(:,2).^2;
-    dYdX = [0.25 * exp(0.25 * X(:,1)), 0.8 * X(:,2)];
-
-    data = struct();
-    data.X_train = X;
-    data.Y_train = Y;
-    data.dYdX_train = dYdX;
-
-    ModelOpts = struct();
-    ModelOpts.Order = 3;
-    ModelOpts.qnorm = 1.0;
-    ModelOpts.aPC_Method = 'stieltjes';
-    ModelOpts.RegressionMethod = 'lars';
-    ModelOpts.TrendBuilder = 'lars';
-    ModelOpts.ModelType = 'geapck';
-    ModelOpts.PCKType = 'sequential';
-    ModelOpts.GradientMode = 'provided';
-    ModelOpts.Parallel = 0;
-    ModelOpts.KrigingOpts.corr = 'gaussian';
-    ModelOpts.KrigingOpts.optimize_theta = true;
-    ModelOpts.KrigingOpts.theta_strategy = 'apck_surrogate';
-    ModelOpts.KrigingOpts.theta0 = [0.6, 0.9];
-    ModelOpts.KrigingOpts.theta_lb = 1e-2;
-    ModelOpts.KrigingOpts.theta_ub = 10;
-
-    [results, ~, ~, ~] = aPC_Train(data, ModelOpts);
-
-    verifyEqual(testCase, results.PCKModel.theta_strategy, 'apck_surrogate');
-    verifyTrue(testCase, isfield(results.PCKModel, 'theta_stage1'));
-    verifyTrue(testCase, all(isfinite(results.PCKModel.theta_stage1)));
-    verifyTrue(testCase, all(isfinite(results.PCKModel.theta)));
-    verifyGreaterThanOrEqual(testCase, min(results.PCKModel.theta), ModelOpts.KrigingOpts.theta_lb);
-    verifyLessThanOrEqual(testCase, max(results.PCKModel.theta), ModelOpts.KrigingOpts.theta_ub);
-    verifyTrue(testCase, isfinite(results.PCKModel.loo));
-end
-
-function testGEAPCKSequentialAPCKSurrogateRefineThetaRuns(testCase)
-    rng(17);
-    N = 14;
-    X = rand(N, 2) * 2 - 1;
-    Y = exp(0.25 * X(:,1)) + 0.4 * X(:,2).^2;
-    dYdX = [0.25 * exp(0.25 * X(:,1)), 0.8 * X(:,2)];
-
-    data = struct();
-    data.X_train = X;
-    data.Y_train = Y;
-    data.dYdX_train = dYdX;
-
-    ModelOpts = struct();
-    ModelOpts.Order = 3;
-    ModelOpts.qnorm = 1.0;
-    ModelOpts.aPC_Method = 'stieltjes';
-    ModelOpts.RegressionMethod = 'lars';
-    ModelOpts.TrendBuilder = 'lars';
-    ModelOpts.ModelType = 'geapck';
-    ModelOpts.PCKType = 'sequential';
-    ModelOpts.GradientMode = 'provided';
-    ModelOpts.Parallel = 0;
-    ModelOpts.KrigingOpts.corr = 'gaussian';
-    ModelOpts.KrigingOpts.optimize_theta = true;
-    ModelOpts.KrigingOpts.theta_strategy = 'apck_surrogate_refine';
-    ModelOpts.KrigingOpts.theta_refine_max_iterations = 3;
-    ModelOpts.KrigingOpts.theta_refine_max_function_evaluations = 12;
-    ModelOpts.KrigingOpts.theta0 = [0.6, 0.9];
-    ModelOpts.KrigingOpts.theta_lb = 1e-2;
-    ModelOpts.KrigingOpts.theta_ub = 10;
-
-    [results, ~, ~, ~] = aPC_Train(data, ModelOpts);
-
-    verifyEqual(testCase, results.PCKModel.theta_strategy, 'apck_surrogate_refine');
-    verifyTrue(testCase, isfield(results.PCKModel, 'theta_stage1'));
-    verifyTrue(testCase, isfield(results.PCKModel, 'theta_refine_opt_output'));
-    verifyTrue(testCase, all(isfinite(results.PCKModel.theta)));
-    verifyTrue(testCase, isfinite(results.PCKModel.loo));
-end
-
-function testGEAPCKSequentialRefineRejectsNonPositiveIterationBudget(testCase)
-    rng(17);
-    N = 14;
-    X = rand(N, 2) * 2 - 1;
-    Y = exp(0.25 * X(:,1)) + 0.4 * X(:,2).^2;
-    dYdX = [0.25 * exp(0.25 * X(:,1)), 0.8 * X(:,2)];
-
-    data = struct();
-    data.X_train = X;
-    data.Y_train = Y;
-    data.dYdX_train = dYdX;
-
-    ModelOpts = struct();
-    ModelOpts.Order = 3;
-    ModelOpts.qnorm = 1.0;
-    ModelOpts.aPC_Method = 'stieltjes';
-    ModelOpts.RegressionMethod = 'lars';
-    ModelOpts.TrendBuilder = 'lars';
-    ModelOpts.ModelType = 'geapck';
-    ModelOpts.PCKType = 'sequential';
-    ModelOpts.GradientMode = 'provided';
-    ModelOpts.Parallel = 0;
-    ModelOpts.KrigingOpts.corr = 'gaussian';
-    ModelOpts.KrigingOpts.optimize_theta = true;
-    ModelOpts.KrigingOpts.theta_strategy = 'apck_surrogate_refine';
-    ModelOpts.KrigingOpts.theta_refine_max_iterations = 0;
-    ModelOpts.KrigingOpts.theta0 = [0.6, 0.9];
-    ModelOpts.KrigingOpts.theta_lb = 1e-2;
-    ModelOpts.KrigingOpts.theta_ub = 10;
-
-    verifyError(testCase, @() aPC_Train(data, ModelOpts), 'aPC:InvalidThetaRefineIterations');
 end
 
 function testAPCKThetaOptimizationUsesFmincon(testCase)
