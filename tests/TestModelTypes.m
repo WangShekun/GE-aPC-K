@@ -114,6 +114,42 @@ function testGEAPCKSequentialThetaOptimizationRuns(testCase)
     verifyTrue(testCase, all(isfinite(results.PCKModel.theta)));
 end
 
+function testGEAPCKBlockProvidedAnalyticGradientRuns(testCase)
+    rng(23);
+    N = 20;
+    X = rand(N, 2) * 2 - 1;
+    Y = exp(0.2 * X(:,1)) + 0.3 * X(:,1) .* X(:,2) + 0.4 * X(:,2).^2;
+    dYdX = [0.2 * exp(0.2 * X(:,1)) + 0.3 * X(:,2), 0.3 * X(:,1) + 0.8 * X(:,2)];
+
+    data = struct();
+    data.X_train = X;
+    data.Y_train = Y;
+    data.dYdX_train = dYdX;
+
+    ModelOpts = struct();
+    ModelOpts.Order = 3;
+    ModelOpts.qnorm = 1.0;
+    ModelOpts.aPC_Method = 'stieltjes';
+    ModelOpts.RegressionMethod = 'lars';
+    ModelOpts.ModelType = 'geapck_block';
+    ModelOpts.PCKType = 'sequential';
+    ModelOpts.GradientMode = 'provided';
+    ModelOpts.Parallel = 0;
+    ModelOpts.GEBlockOpts.num_blocks = 2;
+
+    [results, ModelOptsOut, dataOut, ReduceModel] = aPC_Train(data, ModelOpts);
+
+    verifyEqual(testCase, lower(results.ModelType), 'geapck_block');
+    verifyEqual(testCase, lower(results.PCKType), 'sequential');
+    verifyTrue(testCase, isfield(dataOut, 'dYdX_train'));
+    verifyEqual(testCase, results.PCKModel.mode, 'block');
+    verifyEqual(testCase, numel(results.PCKModel.blocks), 2);
+
+    Yhat = aPC_Predict(X, results, ModelOptsOut, ReduceModel);
+    verifySize(testCase, Yhat, [N, 1]);
+    verifyTrue(testCase, all(isfinite(Yhat)));
+end
+
 function testAPCKThetaOptimizationUsesFmincon(testCase)
 data = makeData(22, 2);
 

@@ -9,16 +9,17 @@ uqlab
 ModelOpts = struct();
 
 % === 基础多项式设置 ===
-ModelOpts.Order = [8];                  % 多项式总阶数 p；可设为标量或搜索向量
+ModelOpts.Order = [4];                  % 多项式总阶数 p；可设为标量或搜索向量
 ModelOpts.qnorm = [0.9];                % q-norm 截断参数；越小越稀疏
 ModelOpts.aPC_Method = 'stieltjes';     % 一维 aPC 构造方法：'2012' | '2018' | 'stieltjes'
 ModelOpts.RegressionMethod = 'lars';    % APC trend 的回归器：通常用 'lars'
 ModelOpts.TrendBuilder = 'lars';
 % === 模型选择设置 ===
-ModelOpts.ModelType = 'apck';           % 模型类型：'apc' | 'apck' | 'geapck'
+ModelOpts.ModelType = 'geapck_block';           % 模型类型：'apc' | 'apck' | 'geapck'
 ModelOpts.PCKType = 'optimal';          % PCK 策略：'sequential' | 'optimal'
 % ModelOpts.GradientMode = 'provided';  % GEAPCK 梯度来源：'provided' | 'finite-difference' | 'auto'
 ModelOpts.Parallel = 0;                 % 是否并行搜索候选配置：0/1
+ModelOpts.GEBlockOpts.num_blocks = 4;
 
 % === 降维设置 ===
 % ModelOpts.ReductionMethod = 'as';    % 降维方法：'pls' | 'pca' | 'kpca' | 'mcp' | 'ica' | 'rp' | ...
@@ -98,7 +99,7 @@ ModelOpts.KrigingOpts.DisplayProgress = true;% 是否显示 sequential/optimal �
 % ModelOpts.FDOpts.step = 1e-6;               % 相对步长，用于自动数值梯度
 
 % === 基准函数选择（含梯度） ===
-Benchmark.Name = 'ishigami';          % 'ishigami' | 'wingweight' | 'morris10'
+Benchmark.Name = 'wingweight';          % 'ishigami' | 'wingweight' | 'morris10'
 Benchmark.N_train = 200;
 Benchmark.N_val = 2000;
 Benchmark.GradientSource = 'finite-difference';  % 'provided' | 'finite-difference' | 'auto'
@@ -133,7 +134,7 @@ end
 data.X_val = uq_getSample(myInput, Benchmark.N_val);
 data.Y_val = benchSpec.ModelFcn(data.X_val);
 
-model_list = {'uqlab_pce','apc','apck','geapck'};
+model_list = {'geapck_block'};
 rows = numel(model_list);
 
 bench = repmat(struct( ...
@@ -212,7 +213,7 @@ function out = run_apc_family(data, ModelOpts, model_name, Benchmark)
         if isfield(opts, 'PCKType')
             opts = rmfield(opts, 'PCKType');
         end
-    elseif strcmpi(opts.ModelType, 'geapck')
+    elseif strcmpi(opts.ModelType, 'geapck') || strcmpi(opts.ModelType, 'geapck_block')
         src = lower(strtrim(Benchmark.GradientSource));
         if strcmp(src, 'analytic')
             opts.GradientMode = 'provided';
