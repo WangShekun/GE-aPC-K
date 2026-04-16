@@ -15,11 +15,12 @@ ModelOpts.aPC_Method = 'stieltjes';     % 一维 aPC 构造方法：'2012' | '20
 ModelOpts.RegressionMethod = 'lars';    % APC trend 的回归器：通常用 'lars'
 ModelOpts.TrendBuilder = 'lars';
 % === 模型选择设置 ===
-ModelOpts.ModelType = 'geapck_block';           % 模型类型：'apc' | 'apck' | 'geapck'
+ModelOpts.ModelType = 'geapck_lowrank';         % 模型类型：'apc' | 'apck' | 'geapck' | 'geapck_lowrank'
 ModelOpts.PCKType = 'optimal';          % PCK 策略：'sequential' | 'optimal'
 % ModelOpts.GradientMode = 'provided';  % GEAPCK 梯度来源：'provided' | 'finite-difference' | 'auto'
 ModelOpts.Parallel = 0;                 % 是否并行搜索候选配置：0/1
-ModelOpts.GEBlockOpts.num_blocks = 4;
+ModelOpts.GELowRankOpts.rank = 3;
+ModelOpts.GELowRankOpts.method = 'svd';
 
 % === 降维设置 ===
 % ModelOpts.ReductionMethod = 'as';    % 降维方法：'pls' | 'pca' | 'kpca' | 'mcp' | 'ica' | 'rp' | ...
@@ -134,7 +135,7 @@ end
 data.X_val = uq_getSample(myInput, Benchmark.N_val);
 data.Y_val = benchSpec.ModelFcn(data.X_val);
 
-model_list = {'geapck_block'};
+model_list = {'geapck_lowrank'};
 rows = numel(model_list);
 
 bench = repmat(struct( ...
@@ -213,7 +214,7 @@ function out = run_apc_family(data, ModelOpts, model_name, Benchmark)
         if isfield(opts, 'PCKType')
             opts = rmfield(opts, 'PCKType');
         end
-    elseif strcmpi(opts.ModelType, 'geapck') || strcmpi(opts.ModelType, 'geapck_block')
+    elseif strcmpi(opts.ModelType, 'geapck') || strcmpi(opts.ModelType, 'geapck_lowrank')
         src = lower(strtrim(Benchmark.GradientSource));
         if strcmp(src, 'analytic')
             opts.GradientMode = 'provided';
