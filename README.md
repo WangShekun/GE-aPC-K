@@ -31,6 +31,7 @@ ModelOpts.KrigingOpts.nugget = 1e-8;       % 数值稳定项
 ModelOpts.KrigingOpts.optimize_theta = 1;  % 是否优化 theta
 ModelOpts.KrigingOpts.trend_range = [0.1 0.8]; % PCK trend 搜索范围
 ModelOpts.GELowRankOpts.rank = 3;          % GE low-rank 保留的梯度模态数
+ModelOpts.GELowRankOpts.method = 'svd';    % low-rank 二次降维方法
 ModelOpts.FDOpts.type = 'central';         % 数值梯度类型
 ModelOpts.FDOpts.step = 1e-6;              % 数值梯度相对步长
 ```
@@ -249,7 +250,10 @@ ModelOpts.KrigingOpts.early_stop_patience = 3; % 连续若干 trend 无改进则
 功能：
 - `geapck_lowrank` 后端。
 - 先在模型空间梯度上做低秩模态压缩，再构造 GE 增广系统。
-- 当前使用 SVD 提取主导梯度模态。
+- 当前保留三种二次降维路径：
+  - `svd`：标准梯度 SVD 截断基线。
+  - `hybrid_residual_subspace`：主梯度子空间 + 残差梯度子空间拼接并正交化；`residual_rank` 可手动指定，也可设为 `'auto'` 自动选择。
+  - `supervised_joint_operator`：在 `svd` 与 `hybrid_residual_subspace` 之间做连续融合，并用轻量监督目标选最优融合强度。
 
 相关设置字段：
 
@@ -257,8 +261,40 @@ ModelOpts.KrigingOpts.early_stop_patience = 3; % 连续若干 trend 无改进则
 ModelOpts.ModelType = 'geapck_lowrank';   % 启用 GE low-rank 路径
 ModelOpts.PCKType = 'optimal';            % 是否搜索 trend
 ModelOpts.GELowRankOpts.rank = 3;         % 保留的梯度模态数
-ModelOpts.GELowRankOpts.method = 'svd';   % 当前支持的低秩方法
 ```
+
+按方法分别配置：
+
+```matlab
+% 1) SVD baseline
+ModelOpts.GELowRankOpts.method = 'svd';
+```
+
+```matlab
+% 2) Hybrid residual subspace
+ModelOpts.GELowRankOpts.method = 'hybrid_residual_subspace';
+ModelOpts.GELowRankOpts.residual_rank = 1;      % 手动指定残差子空间维数（可选）
+ModelOpts.GELowRankOpts.residual_rank = 'auto'; % 自动选择残差子空间维数（可选）
+ModelOpts.GELowRankOpts.operator_grad_weight = 0.1; % 仅当 residual_rank='auto' 时生效；用于 J = L_value + lambda * L_grad
+```
+
+```matlab
+% 3) Supervised joint operator
+ModelOpts.GELowRankOpts.method = 'supervised_joint_operator';
+ModelOpts.GELowRankOpts.operator_eta_grid = [0 0.1 0.2 0.4 0.8 1.2]; % eta 搜索网格（可选）
+ModelOpts.GELowRankOpts.operator_grad_weight = 0.1;                   % 联合目标中的梯度损失权重（可选）
+ModelOpts.GELowRankOpts.operator_search_method = 'grid';              % eta 搜索方式：grid / fminbnd
+```
+
+说明：
+- `operator_grad_weight` 是一个“监督式自动选择”共用参数，不只用于 `supervised_joint_operator`。
+- 当 `hybrid_residual_subspace` 设置 `residual_rank = 'auto'` 时，也会用它来平衡 `L_value` 与 `L_grad`。
+- 当 `hybrid_residual_subspace` 使用手动数值 `residual_rank` 时，这个参数不参与计算。
+
+使用建议：
+- `svd`：最稳的基线，适合平滑问题或默认配置。
+- `hybrid_residual_subspace`：更适合高维、原始 low-rank SVD 不稳的困难问题；若不想手调残差子空间维数，可设 `residual_rank = 'auto'`。
+- `supervised_joint_operator`：当前最有研究价值的分支；在 `svd` 与 `hybrid` 之间连续寻优，适合作为实验方法继续打磨。默认建议 `operator_search_method = 'grid'`。
 
 ## 5. `coefficients/pck/`
 

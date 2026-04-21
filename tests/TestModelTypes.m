@@ -152,6 +152,202 @@ function testGEAPCKLowRankProvidedAnalyticGradientRuns(testCase)
     verifyTrue(testCase, all(isfinite(Yhat)));
 end
 
+function testGEAPCKLowRankHybridResidualSubspaceRuns(testCase)
+    rng(43);
+    N = 24;
+    X = rand(N, 3) * 2 - 1;
+    Y = exp(0.2 * X(:,1)) + 0.6 * X(:,1) .* X(:,2) + 0.2 * X(:,3).^3;
+    dYdX = [0.2 * exp(0.2 * X(:,1)) + 0.6 * X(:,2), 0.6 * X(:,1), 0.6 * X(:,3).^2];
+
+    data = struct();
+    data.X_train = X;
+    data.Y_train = Y;
+    data.dYdX_train = dYdX;
+
+    ModelOpts = struct();
+    ModelOpts.Order = 3;
+    ModelOpts.qnorm = 1.0;
+    ModelOpts.aPC_Method = 'stieltjes';
+    ModelOpts.RegressionMethod = 'lars';
+    ModelOpts.ModelType = 'geapck_lowrank';
+    ModelOpts.PCKType = 'sequential';
+    ModelOpts.GradientMode = 'provided';
+    ModelOpts.Parallel = 0;
+    ModelOpts.GELowRankOpts.rank = 2;
+    ModelOpts.GELowRankOpts.method = 'hybrid_residual_subspace';
+
+    [results, ModelOptsOut, ~, ReduceModel] = aPC_Train(data, ModelOpts);
+    Yhat = aPC_Predict(X, results, ModelOptsOut, ReduceModel);
+
+    verifyEqual(testCase, lower(results.PCKModel.lowrank_options.method), 'hybrid_residual_subspace');
+    verifyEqual(testCase, results.PCKModel.lowrank.rank, 2);
+    verifyEqual(testCase, lower(results.PCKModel.lowrank.hybrid_residual_mode), 'post_project');
+    verifySize(testCase, results.PCKModel.lowrank.V_r, [3, 2]);
+    verifySize(testCase, results.PCKModel.lowrank.Z, [N, 2]);
+    verifyTrue(testCase, all(isfinite(results.PCKModel.lowrank.singular_values)));
+    verifyTrue(testCase, all(isfinite(Yhat)));
+end
+
+function testGEAPCKLowRankHybridResidualSubspaceProjectedModeRuns(testCase)
+    rng(44);
+    N = 24;
+    X = rand(N, 3) * 2 - 1;
+    Y = exp(0.2 * X(:,1)) + 0.6 * X(:,1) .* X(:,2) + 0.2 * X(:,3).^3;
+    dYdX = [0.2 * exp(0.2 * X(:,1)) + 0.6 * X(:,2), 0.6 * X(:,1), 0.6 * X(:,3).^2];
+
+    data = struct();
+    data.X_train = X;
+    data.Y_train = Y;
+    data.dYdX_train = dYdX;
+
+    ModelOpts = struct();
+    ModelOpts.Order = 3;
+    ModelOpts.qnorm = 1.0;
+    ModelOpts.aPC_Method = 'stieltjes';
+    ModelOpts.RegressionMethod = 'lars';
+    ModelOpts.ModelType = 'geapck_lowrank';
+    ModelOpts.PCKType = 'sequential';
+    ModelOpts.GradientMode = 'provided';
+    ModelOpts.Parallel = 0;
+    ModelOpts.GELowRankOpts.rank = 2;
+    ModelOpts.GELowRankOpts.method = 'hybrid_residual_subspace';
+    ModelOpts.GELowRankOpts.hybrid_residual_mode = 'project_then_svd';
+
+    [results, ModelOptsOut, ~, ReduceModel] = aPC_Train(data, ModelOpts);
+    Yhat = aPC_Predict(X, results, ModelOptsOut, ReduceModel);
+
+    verifyEqual(testCase, lower(results.PCKModel.lowrank.hybrid_residual_mode), 'project_then_svd');
+    verifyEqual(testCase, results.PCKModel.lowrank.rank, 2);
+    verifyTrue(testCase, all(isfinite(Yhat)));
+end
+
+function testGEAPCKLowRankHybridResidualSubspaceAutoResidualRankRuns(testCase)
+    rng(71);
+    N = 24;
+    X = rand(N, 3) * 2 - 1;
+    Y = exp(0.2 * X(:,1)) + 0.6 * X(:,1) .* X(:,2) + 0.2 * X(:,3).^3;
+    dYdX = [0.2 * exp(0.2 * X(:,1)) + 0.6 * X(:,2), 0.6 * X(:,1), 0.6 * X(:,3).^2];
+
+    data = struct();
+    data.X_train = X;
+    data.Y_train = Y;
+    data.dYdX_train = dYdX;
+
+    ModelOpts = struct();
+    ModelOpts.Order = 3;
+    ModelOpts.qnorm = 1.0;
+    ModelOpts.aPC_Method = 'stieltjes';
+    ModelOpts.RegressionMethod = 'lars';
+    ModelOpts.ModelType = 'geapck_lowrank';
+    ModelOpts.PCKType = 'sequential';
+    ModelOpts.GradientMode = 'provided';
+    ModelOpts.Parallel = 0;
+    ModelOpts.GELowRankOpts.rank = 3;
+    ModelOpts.GELowRankOpts.method = 'hybrid_residual_subspace';
+    ModelOpts.GELowRankOpts.residual_rank = 'auto';
+
+    [results, ModelOptsOut, ~, ReduceModel] = aPC_Train(data, ModelOpts);
+    Yhat = aPC_Predict(X, results, ModelOptsOut, ReduceModel);
+
+    verifyEqual(testCase, lower(results.PCKModel.lowrank_options.method), 'hybrid_residual_subspace');
+    verifyEqual(testCase, results.PCKModel.lowrank.rank, 3);
+    verifyTrue(testCase, isfield(results.PCKModel.lowrank, 'auto_residual_selected_rank'));
+    verifyTrue(testCase, numel(results.PCKModel.lowrank.auto_residual_rank_grid) >= 1);
+    verifyTrue(testCase, all(isfinite(results.PCKModel.lowrank.auto_residual_proxy_scores)));
+    verifyTrue(testCase, all(isfinite(Yhat)));
+end
+
+function testGEAPCKLowRankSupervisedJointOperatorRuns(testCase)
+    rng(61);
+    N = 26;
+    X = rand(N, 3) * 2 - 1;
+    Y = exp(0.2 * X(:,1)) + 0.6 * X(:,1) .* X(:,2) + 0.2 * X(:,3).^3;
+    dYdX = [0.2 * exp(0.2 * X(:,1)) + 0.6 * X(:,2), 0.6 * X(:,1), 0.6 * X(:,3).^2];
+
+    data = struct();
+    data.X_train = X;
+    data.Y_train = Y;
+    data.dYdX_train = dYdX;
+
+    ModelOpts = struct();
+    ModelOpts.Order = 3;
+    ModelOpts.qnorm = 1.0;
+    ModelOpts.aPC_Method = 'stieltjes';
+    ModelOpts.RegressionMethod = 'lars';
+    ModelOpts.ModelType = 'geapck_lowrank';
+    ModelOpts.PCKType = 'sequential';
+    ModelOpts.GradientMode = 'provided';
+    ModelOpts.Parallel = 0;
+    ModelOpts.GELowRankOpts.rank = 2;
+    ModelOpts.GELowRankOpts.method = 'supervised_joint_operator';
+    ModelOpts.GELowRankOpts.operator_eta_grid = [0, 0.5, 1.0];
+
+    [results, ModelOptsOut, ~, ReduceModel] = aPC_Train(data, ModelOpts);
+    Yhat = aPC_Predict(X, results, ModelOptsOut, ReduceModel);
+
+    verifyEqual(testCase, lower(results.PCKModel.lowrank_options.method), 'supervised_joint_operator');
+    verifyEqual(testCase, results.PCKModel.lowrank.rank, 2);
+    verifyTrue(testCase, isfield(results.PCKModel.lowrank, 'operator_selected_eta'));
+    verifyEqual(testCase, numel(results.PCKModel.lowrank.operator_eta_grid), 3);
+    verifyTrue(testCase, all(isfinite(results.PCKModel.lowrank.operator_proxy_scores)));
+    verifyTrue(testCase, all(isfinite(results.PCKModel.lowrank.operator_value_scores)));
+    verifyTrue(testCase, all(isfinite(results.PCKModel.lowrank.operator_grad_scores)));
+    verifyTrue(testCase, all(isfinite(Yhat)));
+end
+
+function testGEAPCKLowRankSupervisedJointOperatorFminbndRuns(testCase)
+    rng(67);
+    N = 24;
+    X = rand(N, 3) * 2 - 1;
+    Y = exp(0.18 * X(:,1)) + 0.45 * X(:,1) .* X(:,2) + 0.12 * X(:,3).^3;
+    dYdX = [0.18 * exp(0.18 * X(:,1)) + 0.45 * X(:,2), 0.45 * X(:,1), 0.36 * X(:,3).^2];
+
+    data = struct();
+    data.X_train = X;
+    data.Y_train = Y;
+    data.dYdX_train = dYdX;
+
+    ModelOpts = struct();
+    ModelOpts.Order = 3;
+    ModelOpts.qnorm = 1.0;
+    ModelOpts.aPC_Method = 'stieltjes';
+    ModelOpts.RegressionMethod = 'lars';
+    ModelOpts.ModelType = 'geapck_lowrank';
+    ModelOpts.PCKType = 'sequential';
+    ModelOpts.GradientMode = 'provided';
+    ModelOpts.Parallel = 0;
+    ModelOpts.GELowRankOpts.rank = 2;
+    ModelOpts.GELowRankOpts.method = 'supervised_joint_operator';
+    ModelOpts.GELowRankOpts.operator_search_method = 'fminbnd';
+    ModelOpts.GELowRankOpts.operator_eta_grid = [0, 0.5, 1.0];
+
+    [results, ModelOptsOut, ~, ReduceModel] = aPC_Train(data, ModelOpts);
+    Yhat = aPC_Predict(X, results, ModelOptsOut, ReduceModel);
+
+    verifyEqual(testCase, lower(results.PCKModel.lowrank.operator_search_method), 'fminbnd');
+    verifyTrue(testCase, isfield(results.PCKModel.lowrank, 'operator_sample_eta'));
+    verifyTrue(testCase, all(isfinite(results.PCKModel.lowrank.operator_sample_eta)));
+    verifyTrue(testCase, all(isfinite(results.PCKModel.lowrank.operator_proxy_scores)));
+    verifyTrue(testCase, all(isfinite(Yhat)));
+end
+
+function testAutoSearchIncludesGELowRankRank(testCase)
+    ModelOpts = struct();
+    ModelOpts.ModelType = 'geapck_lowrank';
+    ModelOpts.Order = 2;
+    ModelOpts.qnorm = 0.8;
+    ModelOpts.GELowRankOpts.rank = [2 3 5];
+    ModelOpts.GELowRankOpts.method = 'svd';
+    ModelOpts.KrigingOpts.corr = 'gaussian';
+
+    grid = aPC_build_search_grid(ModelOpts);
+
+    verifyNumElements(testCase, grid, 3);
+    verifyEqual(testCase, arrayfun(@(g) g.GELowRankOpts.rank, grid), [2 3 5]);
+    verifyTrue(testCase, all(arrayfun(@(g) strcmp(g.GELowRankOpts.method, 'svd'), grid)));
+    verifyTrue(testCase, all(arrayfun(@(g) strcmp(g.ModelType, 'geapck_lowrank'), grid)));
+end
+
 function testGEAPCKLowRankGaussianAssemblyMatchesLegacyProjection(testCase)
     fixture = localMakeLowRankAssemblyFixture();
 
@@ -189,6 +385,7 @@ function testGEAPCKLowRankMatern32AssemblyMatchesLegacyProjection(testCase)
     verifyEqual(testCase, lowrank_new.Z, lowrank_ref.Z, 'AbsTol', 1e-12);
     verifyEqual(testCase, lowrank_new.singular_values, lowrank_ref.singular_values, 'AbsTol', 1e-12);
 end
+
 
 function testGEAPCKLowRankGaussianPredictionMatchesLegacyProjection(testCase)
     fixture = localMakeLowRankPredictionFixture();
