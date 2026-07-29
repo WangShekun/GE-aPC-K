@@ -27,6 +27,12 @@ function results = aPC_PCKBackendLowRankGE(Psi, data_model, ModelOpts, basis_inf
     KrigingOpts = localSetDef(KrigingOpts, 'optimize_theta', false);
     KrigingOpts = localSetDef(KrigingOpts, 'DisplayProgress', false);
     KrigingOpts = localSetDef(KrigingOpts, 'early_stop_patience', inf);
+    KrigingOpts = localSetDef(KrigingOpts, 'stabilization', 'nugget');
+    KrigingOpts.stabilization = lower(strtrim(KrigingOpts.stabilization));
+    if ~any(strcmp(KrigingOpts.stabilization, {'nugget', 'constrained_projection'}))
+        error('aPC:UnsupportedStabilization', ...
+            'KrigingOpts.stabilization must be ''nugget'' or ''constrained_projection''.');
+    end
 
     GELowRankOpts = localSetDef(GELowRankOpts, 'rank', 3);
     GELowRankOpts = localSetDef(GELowRankOpts, 'method', 'svd');
@@ -35,9 +41,13 @@ function results = aPC_PCKBackendLowRankGE(Psi, data_model, ModelOpts, basis_inf
     GELowRankOpts = localSetDef(GELowRankOpts, 'operator_eta_grid', [0, 0.05, 0.1, 0.2, 0.4, 0.8, 1.2, 2.0]);
     GELowRankOpts = localSetDef(GELowRankOpts, 'operator_grad_weight', 0.1);
     GELowRankOpts = localSetDef(GELowRankOpts, 'operator_search_method', 'grid');
+    GELowRankOpts = localSetDef(GELowRankOpts, 'weighted_gradient', false);
+    GELowRankOpts = localSetDef(GELowRankOpts, 'weighting_score', 'gradnorm');
+    GELowRankOpts = localSetDef(GELowRankOpts, 'weighting_budget', 1.0);
     GELowRankOpts.method = lower(strtrim(GELowRankOpts.method));
     GELowRankOpts.hybrid_residual_mode = lower(strtrim(GELowRankOpts.hybrid_residual_mode));
     GELowRankOpts.operator_search_method = lower(strtrim(GELowRankOpts.operator_search_method));
+    GELowRankOpts.weighting_score = lower(strtrim(GELowRankOpts.weighting_score));
     if ~any(strcmp(GELowRankOpts.method, {'svd', 'hybrid_residual_subspace', 'supervised_joint_operator'}))
         error('aPC:UnsupportedGELowRankMethod', ...
             'GELowRankOpts.method currently only supports ''svd'', ''hybrid_residual_subspace'', or ''supervised_joint_operator''.');
@@ -49,6 +59,10 @@ function results = aPC_PCKBackendLowRankGE(Psi, data_model, ModelOpts, basis_inf
     if ~any(strcmp(GELowRankOpts.hybrid_residual_mode, {'post_project', 'project_then_svd'}))
         error('aPC:UnsupportedHybridResidualMode', ...
             'GELowRankOpts.hybrid_residual_mode must be ''post_project'' or ''project_then_svd''.');
+    end
+    if ~any(strcmp(GELowRankOpts.weighting_score, {'gradnorm', 'residual_gradnorm'}))
+        error('aPC:UnsupportedWeightedGradientScore', ...
+            'GELowRankOpts.weighting_score must be ''gradnorm'' or ''residual_gradnorm''.');
     end
     trend_builder = 'lars';
     if isfield(ModelOpts, 'TrendBuilder') && ~isempty(ModelOpts.TrendBuilder)
@@ -72,29 +86,30 @@ function results = aPC_PCKBackendLowRankGE(Psi, data_model, ModelOpts, basis_inf
     trend_sizes = k_start:k_end;
 
     best = struct();
-    no_improve_count = 0;
-    theta_prev = [];
-    for i = 1:numel(trend_sizes)
-        theta_init = [];
-        if strcmp(pck_type, 'optimal') && KrigingOpts.optimize_theta && ~isempty(theta_prev)
-            theta_init = theta_prev;
-        end
-        trend_idx = final_support(1:trend_sizes(i));
-        model_i = localEvaluateTrendIdx(trend_idx, i, numel(trend_sizes), Psi, U, Y, basis_info, KrigingOpts, GELowRankOpts, theta_init, lowrank_cache);
-        if strcmp(pck_type, 'optimal') && KrigingOpts.optimize_theta && all(isfinite(model_i.theta))
-            theta_prev = model_i.theta;
-        end
-        if ~isfield(best, 'trend_idx') || model_i.loo < best.loo
-            best = model_i;
-            no_improve_count = 0;
-        else
-            no_improve_count = no_improve_count + 1;
-            if strcmp(pck_type, 'optimal') && no_improve_count >= KrigingOpts.early_stop_patience
-                break;
+    if strcmp(pck_type, 'sequential')
+        best = localEvaluateTrendIdx(final_support, 1, 1, Psi, U, Y, basis_info, KrigingOpts, GELowRankOpts, [], lowrank_cache);
+    else
+        no_improve_count = 0;
+        theta_prev = [];
+        for i = 1:numel(trend_sizes)
+            theta_init = [];
+            if strcmp(pck_type, 'optimal') && KrigingOpts.optimize_theta && ~isempty(theta_prev)
+                theta_init = theta_prev;
             end
-        end
-        if strcmp(pck_type, 'sequential')
-            break;
+            trend_idx = final_support(1:trend_sizes(i));
+            model_i = localEvaluateTrendIdx(trend_idx, i, numel(trend_sizes), Psi, U, Y, basis_info, KrigingOpts, GELowRankOpts, theta_init, lowrank_cache);
+            if strcmp(pck_type, 'optimal') && KrigingOpts.optimize_theta && all(isfinite(model_i.theta))
+                theta_prev = model_i.theta;
+            end
+            if ~isfield(best, 'trend_idx') || model_i.loo < best.loo
+                best = model_i;
+                no_improve_count = 0;
+            else
+                no_improve_count = no_improve_count + 1;
+                if strcmp(pck_type, 'optimal') && no_improve_count >= KrigingOpts.early_stop_patience
+                    break;
+                end
+            end
         end
     end
 
@@ -155,12 +170,19 @@ function model = localFitOne(F, dF_r, Y, U, KrigingOpts, GELowRankOpts, theta_in
         theta_ub = KrigingOpts.theta_ub;
     end
 
+    if strcmp(KrigingOpts.stabilization, 'constrained_projection')
+        H = [F; dF_r];
+        W = null(H')';
+    else
+        W = [];
+    end
+
     if KrigingOpts.optimize_theta
         z0 = log(theta0);
         zlb = log(theta_lb);
         zub = log(theta_ub);
         opts = optimoptions('fmincon', 'Algorithm', 'sqp', 'Display', 'off', 'MaxIterations', 80, 'MaxFunctionEvaluations', 300);
-        [zopt, ~, exitflag, output] = fmincon(@(z) localNLLOnly(exp(z), F, dF_r, Y, U, KrigingOpts, GELowRankOpts, lowrank_cache), ...
+        [zopt, ~, exitflag, output] = fmincon(@(z) localNLLOnly(exp(z), F, dF_r, Y, U, KrigingOpts, GELowRankOpts, lowrank_cache, W), ...
             z0, [], [], [], [], zlb, zub, [], opts);
         theta = exp(zopt);
         theta_optimizer = 'fmincon';
@@ -172,7 +194,7 @@ function model = localFitOne(F, dF_r, Y, U, KrigingOpts, GELowRankOpts, theta_in
     end
 
     theta = min(max(theta, theta_lb), theta_ub);
-    model = localBuildModel(theta, F, dF_r, Y, U, KrigingOpts, GELowRankOpts, lowrank_cache);
+    model = localBuildModel(theta, F, dF_r, Y, U, KrigingOpts, GELowRankOpts, lowrank_cache, W);
     model.theta = theta;
     model.theta_init_used = theta0;
     model.theta_optimizer = theta_optimizer;
@@ -180,12 +202,12 @@ function model = localFitOne(F, dF_r, Y, U, KrigingOpts, GELowRankOpts, theta_in
     model.theta_opt_output = output;
 end
 
-function nll = localNLLOnly(theta, F, dF_r, Y, U, KrigingOpts, GELowRankOpts, lowrank_cache)
-    [nll, ~] = localEvalThetaCore(theta, F, dF_r, Y, U, KrigingOpts, GELowRankOpts, lowrank_cache);
+function nll = localNLLOnly(theta, F, dF_r, Y, U, KrigingOpts, GELowRankOpts, lowrank_cache, W)
+    [nll, ~] = localEvalThetaCore(theta, F, dF_r, Y, U, KrigingOpts, GELowRankOpts, lowrank_cache, W);
 end
 
-function model = localBuildModel(theta, F, dF_r, Y, U, KrigingOpts, GELowRankOpts, lowrank_cache)
-    [~, core] = localEvalThetaCore(theta, F, dF_r, Y, U, KrigingOpts, GELowRankOpts, lowrank_cache);
+function model = localBuildModel(theta, F, dF_r, Y, U, KrigingOpts, GELowRankOpts, lowrank_cache, W)
+    [~, core] = localEvalThetaCore(theta, F, dF_r, Y, U, KrigingOpts, GELowRankOpts, lowrank_cache, W);
 
     if core.chol_failed
         alpha = core.alpha;
@@ -194,8 +216,13 @@ function model = localBuildModel(theta, F, dF_r, Y, U, KrigingOpts, GELowRankOpt
     else
         alpha = core.alpha;
         residual = core.residual;
-        Uinv = core.L' \ eye(size(core.L));
-        Kinv_diag = sum(Uinv.^2, 2);
+        if strcmp(KrigingOpts.stabilization, 'constrained_projection')
+            projected_inverse = core.L \ core.W;
+            Kinv_diag = sum(projected_inverse.^2, 1)';
+        else
+            Uinv = core.L' \ eye(size(core.L));
+            Kinv_diag = sum(Uinv.^2, 2);
+        end
         Nf = size(Y, 1);
         loo_res = alpha(1:Nf) ./ max(Kinv_diag(1:Nf), eps);
         loo = mean(loo_res.^2) / max(var(Y, 1), eps);
@@ -214,31 +241,52 @@ function model = localBuildModel(theta, F, dF_r, Y, U, KrigingOpts, GELowRankOpt
     model.lowrank = core.lowrank;
 end
 
-function [nll, core] = localEvalThetaCore(theta, F, dF_r, Y, U, KrigingOpts, GELowRankOpts, lowrank_cache)
-    [K, y_aug, H, lowrank] = pckBuildLowRankAugmentedSystem(U, Y, [], F, [], theta, KrigingOpts.corr, KrigingOpts.nugget, GELowRankOpts.rank, lowrank_cache, dF_r);
+function [nll, core] = localEvalThetaCore(theta, F, dF_r, Y, U, KrigingOpts, GELowRankOpts, lowrank_cache, W)
+    use_projection = strcmp(KrigingOpts.stabilization, 'constrained_projection');
+    applied_nugget = KrigingOpts.nugget;
+    if use_projection
+        applied_nugget = 0;
+    end
+    [K, y_aug, H, lowrank] = pckBuildLowRankAugmentedSystem(U, Y, [], F, [], theta, KrigingOpts.corr, applied_nugget, GELowRankOpts.rank, lowrank_cache, dF_r);
     K = (K + K') * 0.5;
-    [L, p] = chol(K, 'lower');
+    if use_projection
+        Ksolve = W * K * W';
+        Ksolve = (Ksolve + Ksolve') * 0.5;
+        rhs = W * y_aug;
+    else
+        Ksolve = K;
+        rhs = [H, y_aug];
+    end
+    [L, p] = chol(Ksolve, 'lower');
     if p ~= 0
         nll = 1e12;
         core = localFallbackCore(F, Y, U, GELowRankOpts.rank);
         return;
     end
 
-    KinvHY = L' \ (L \ [H, y_aug]);
-    KinvH = KinvHY(:, 1:size(H, 2));
-    Kinvy = KinvHY(:, end);
-    A = H' * KinvH;
-    b = H' * Kinvy;
-    if rcond(A) < 1e-12
-        beta = pinv(A) * b;
+    if use_projection
+        gamma = L' \ (L \ rhs);
+        alpha = W' * gamma;
+        beta = lsqminnorm(H, y_aug - K * alpha);
+        residual = y_aug - H * beta;
+        nobs = numel(rhs);
+        sigma2 = max((rhs' * gamma) / nobs, eps);
     else
-        beta = A \ b;
+        KinvHY = L' \ (L \ rhs);
+        KinvH = KinvHY(:, 1:size(H, 2));
+        Kinvy = KinvHY(:, end);
+        A = H' * KinvH;
+        b = H' * Kinvy;
+        if rcond(A) < 1e-12
+            beta = pinv(A) * b;
+        else
+            beta = A \ b;
+        end
+        residual = y_aug - H * beta;
+        alpha = Kinvy - KinvH * beta;
+        nobs = numel(y_aug);
+        sigma2 = max((residual' * alpha) / nobs, eps);
     end
-
-    residual = y_aug - H * beta;
-    alpha = Kinvy - KinvH * beta;
-    nobs = numel(y_aug);
-    sigma2 = max((residual' * alpha) / nobs, eps);
     nll = nobs * log(sigma2) + 2 * sum(log(diag(L)));
 
     core = struct();
@@ -246,6 +294,7 @@ function [nll, core] = localEvalThetaCore(theta, F, dF_r, Y, U, KrigingOpts, GEL
     core.alpha = alpha;
     core.K = K;
     core.L = L;
+    core.W = W;
     core.F = F;
     core.residual = residual;
     core.sigma2 = sigma2;
@@ -381,7 +430,11 @@ function lowrank = localBuildLowRankCacheHybridResidualSubspace(G, Y, Psi, trend
     G_pilot = localStackedGradientToMatrix(dF_pilot * beta_pilot, size(U, 1), size(U, 2));
     G_res = G - G_pilot;
 
-    [~, S_main, V_main] = svd(G, 'econ');
+    [row_weights, weighting_info] = localBuildWeightedGradientRows(G, residual, GELowRankOpts);
+    G_main_svd = localApplyRowWeights(G, row_weights);
+    G_res_svd = localApplyRowWeights(G_res, row_weights);
+
+    [~, S_main, V_main] = svd(G_main_svd, 'econ');
 
     r_res = localResolveResidualRank(r, GELowRankOpts);
     r_main = max(r - r_res, 1);
@@ -391,7 +444,7 @@ function lowrank = localBuildLowRankCacheHybridResidualSubspace(G, Y, Psi, trend
     if r_res > 0
         switch GELowRankOpts.hybrid_residual_mode
             case 'post_project'
-                [~, S_res, V_res] = svd(G_res, 'econ');
+                [~, S_res, V_res] = svd(G_res_svd, 'econ');
                 if ~isempty(V_res)
                     V_res_proj = V_res - basis_parts * (basis_parts' * V_res);
                     [Q_res, R_res] = qr(V_res_proj, 0);
@@ -404,7 +457,7 @@ function lowrank = localBuildLowRankCacheHybridResidualSubspace(G, Y, Psi, trend
                 end
             case 'project_then_svd'
                 P_perp = eye(size(basis_parts, 1)) - basis_parts * basis_parts';
-                G_res_proj = G_res * P_perp;
+                G_res_proj = G_res_svd * P_perp;
                 [~, S_res, V_res_proj] = svd(G_res_proj, 'econ');
                 if ~isempty(V_res_proj)
                     keep_res = min(r_res, size(V_res_proj, 2));
@@ -440,6 +493,16 @@ function lowrank = localBuildLowRankCacheHybridResidualSubspace(G, Y, Psi, trend
     lowrank.residual_rank = max(size(Q, 2) - r_main, 0);
     lowrank.hybrid_residual_mode = GELowRankOpts.hybrid_residual_mode;
     lowrank.pilot_residual_norm = norm(residual) / max(sqrt(numel(residual)), eps);
+    lowrank.weighted_gradient = weighting_info.enabled;
+    lowrank.weighting_score = weighting_info.score_name;
+    lowrank.weighting_budget = weighting_info.budget;
+    if weighting_info.enabled
+        lowrank.weighting_energy_ratio = norm(G_main_svd * lowrank.V_r, 'fro')^2 / max(norm(G_main_svd, 'fro')^2, eps);
+    else
+        lowrank.weighting_energy_ratio = 1.0;
+    end
+    lowrank.point_weights = row_weights(:);
+    lowrank.weighted_point_count = weighting_info.weighted_point_count;
 end
 
 function lowrank = localBuildLowRankCacheHybridAutoResidualRank(G, Y, Psi, trend_path_idx, U, basis_info, r, GELowRankOpts)
@@ -663,6 +726,63 @@ function X = localRemoveNearConstantColumns(X)
     end
     keep = std(X, 0, 1) > 1e-12;
     X = X(:, keep);
+end
+
+function [weights, info] = localBuildWeightedGradientRows(G, residual, GELowRankOpts)
+    N = size(G, 1);
+    weights = ones(N, 1);
+    info = struct();
+    info.enabled = false;
+    info.score_name = GELowRankOpts.weighting_score;
+    info.budget = GELowRankOpts.weighting_budget;
+    info.weighted_point_count = N;
+
+    if ~GELowRankOpts.weighted_gradient
+        return;
+    end
+
+    budget = GELowRankOpts.weighting_budget;
+    if ~isscalar(budget) || ~isfinite(budget) || budget <= 0
+        error('aPC:InvalidWeightedGradientBudget', ...
+            'GELowRankOpts.weighting_budget must be a finite scalar > 0.');
+    end
+
+    grad_norm = sqrt(sum(G .^ 2, 2));
+    switch GELowRankOpts.weighting_score
+        case 'gradnorm'
+            score = grad_norm;
+        case 'residual_gradnorm'
+            score = abs(residual(:)) .* grad_norm;
+        otherwise
+            error('aPC:UnsupportedWeightedGradientScore', ...
+                'Unsupported weighted gradient score: %s.', GELowRankOpts.weighting_score);
+    end
+
+    if budget <= 1
+        keep_count = max(1, ceil(budget * N));
+    else
+        keep_count = min(N, round(budget));
+    end
+    [~, order] = sort(score, 'descend');
+    keep_ids = order(1:keep_count);
+    score_keep = score(keep_ids);
+    score_keep = score_keep / max(max(score_keep), eps);
+    weights = zeros(N, 1);
+    weights(keep_ids) = max(score_keep, 1e-8);
+
+    info.enabled = true;
+    info.weighted_point_count = nnz(weights > 0);
+end
+
+function G_weighted = localApplyRowWeights(G, weights)
+    if isempty(weights)
+        G_weighted = G;
+        return;
+    end
+    if numel(weights) ~= size(G, 1)
+        error('aPC:InvalidWeightedGradientRows', 'Row weight count must match the number of gradient rows.');
+    end
+    G_weighted = G .* sqrt(weights(:));
 end
 
 function r_res = localResolveResidualRank(r, GELowRankOpts)
