@@ -25,6 +25,8 @@ fields = {
     % ===== APCK / GEAPCK =====
     'KrigingOpts.corr'
     'KrigingOpts.nugget'
+    'GELowRankOpts.rank'
+    % 'GELowRankOpts.operator_eta_grid'
 
     % Future extension:
     % 'ridge_lambda'

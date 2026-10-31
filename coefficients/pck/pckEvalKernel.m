@@ -5,13 +5,25 @@ function [Kff, Kfg_blocks, Kgg_blocks] = pckEvalKernel(X1, X2, theta, corr_type)
 
     switch lower(corr_type)
         case 'gaussian'
-            [Kff, Kfg_blocks, Kgg_blocks] = pckKernelGaussian(delta, theta);
+            if nargout <= 1
+                Kff = pckKernelGaussian(delta, theta);
+            elseif nargout == 2
+                [Kff, Kfg_blocks] = pckKernelGaussian(delta, theta);
+            else
+                [Kff, Kfg_blocks, Kgg_blocks] = pckKernelGaussian(delta, theta);
+            end
         case 'exponential'
             Kff = pckKernelExponential(delta, theta);
             Kfg_blocks = {};
             Kgg_blocks = {};
         case 'matern32'
-            [Kff, Kfg_blocks, Kgg_blocks] = pckKernelMatern32(delta, theta);
+            if nargout <= 1
+                Kff = pckKernelMatern32(delta, theta);
+            elseif nargout == 2
+                [Kff, Kfg_blocks] = pckKernelMatern32(delta, theta);
+            else
+                [Kff, Kfg_blocks, Kgg_blocks] = pckKernelMatern32(delta, theta);
+            end
         otherwise
             error('aPC:UnsupportedCorrelation', 'Unsupported corr type: %s', corr_type);
     end

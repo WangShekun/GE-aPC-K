@@ -17,13 +17,17 @@ function candidate = aPC_TrainCandidate(data, map_U, ModelOpts)
         results.ModelType = 'apc';
         results.PCKType = 'none';
     else
-        if strcmp(model_type, 'geapck')
+        if strcmp(model_type, 'geapck') || strcmp(model_type, 'geapck_lowrank')
             % GEAPCK needs response gradients mapped into the same reduced/model
             % space used to build the covariance system.
             [data_model.dY_model, data_model.dYdX_train] = ...
                 aPC_PrepareModelGradients(data_grad, map_U, ReduceModel, ModelOptsOut);
         end
-        results = aPC_PCKBackend(Psi, data_model, ModelOptsOut, basis_info);
+        if strcmp(model_type, 'geapck_lowrank')
+            results = aPC_PCKBackendLowRankGE(Psi, data_model, ModelOptsOut, basis_info);
+        else
+            results = aPC_PCKBackend(Psi, data_model, ModelOptsOut, basis_info);
+        end
     end
 
     candidate = struct();
@@ -55,7 +59,7 @@ function [data_model, data_grad, ModelOptsOut, ReduceModel] = localPrepareModelS
 end
 
 function tf = localNeedsGradientBeforeReduction(ModelOpts)
-    tf = strcmpi(strtrim(ModelOpts.ModelType), 'geapck');
+    tf = strcmpi(strtrim(ModelOpts.ModelType), 'geapck') || strcmpi(strtrim(ModelOpts.ModelType), 'geapck_lowrank');
     if tf || ~isfield(ModelOpts, 'ReductionMethod') || isempty(ModelOpts.ReductionMethod)
         return;
     end

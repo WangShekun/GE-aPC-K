@@ -278,18 +278,18 @@ function ModelOpts = localValidateModelOpts(ModelOpts)
     end
 
     if ~isfield(ModelOpts, 'ModelType') || isempty(ModelOpts.ModelType)
-        error('aPC:MissingModelType', 'ModelOpts.ModelType is required: apc | apck | geapck.');
+        error('aPC:MissingModelType', 'ModelOpts.ModelType is required: apc | apck | geapck | geapck_lowrank.');
     end
 
     model_type = lower(strtrim(ModelOpts.ModelType));
-    valid_model_types = {'apc', 'apck', 'geapck'};
+    valid_model_types = {'apc', 'apck', 'geapck', 'geapck_lowrank'};
     if ~any(strcmp(model_type, valid_model_types))
         error('aPC:InvalidModelType', 'Unsupported ModelType: %s', ModelOpts.ModelType);
     end
 
-    if any(strcmp(model_type, {'apck', 'geapck'}))
+    if any(strcmp(model_type, {'apck', 'geapck', 'geapck_lowrank'}))
         if ~isfield(ModelOpts, 'PCKType') || isempty(ModelOpts.PCKType)
-            error('aPC:MissingPCKType', 'ModelOpts.PCKType is required for APCK/GEAPCK.');
+            error('aPC:MissingPCKType', 'ModelOpts.PCKType is required for APCK/GEAPCK/GEAPCK_LOWRANK.');
         end
         pck_type = lower(strtrim(ModelOpts.PCKType));
         if ~any(strcmp(pck_type, {'sequential', 'optimal'}))

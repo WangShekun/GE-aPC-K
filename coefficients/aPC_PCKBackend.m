@@ -22,7 +22,6 @@ function results = aPC_PCKBackend(Psi, data_model, ModelOpts, basis_info)
     KrigingOpts = localSetDef(KrigingOpts, 'optimize_theta', false);
     KrigingOpts = localSetDef(KrigingOpts, 'DisplayProgress', false);
     KrigingOpts = localSetDef(KrigingOpts, 'early_stop_patience', inf);
-
     early_stop_patience = KrigingOpts.early_stop_patience;
     if ~isscalar(early_stop_patience) || isnan(early_stop_patience) || early_stop_patience < 1
         error('aPC:InvalidEarlyStopPatience', ...
@@ -55,7 +54,7 @@ function results = aPC_PCKBackend(Psi, data_model, ModelOpts, basis_info)
 
     if use_ge
         if ~isfield(data_model, 'dY_model') || isempty(data_model.dY_model)
-            error('aPC:MissingModelGradient', 'GEAPCK requires prepared model-space gradients.');
+            error('aPC:MissingModelGradient', 'This configuration requires prepared model-space gradients.');
         end
         basis_info = localAddUnivDerivativeCache(U, basis_info);
     end
@@ -276,6 +275,7 @@ function model = localBuildModel(theta, F, dF, Y, U, G, KrigingOpts, use_ge)
     model.F = F;
     model.loo = loo;
     model.normEmpErr = normEmpErr;
+    model.nll = core.nll;
 end
 
 function [nll, core] = localEvalThetaCore(theta, F, dF, Y, U, G, KrigingOpts, use_ge)
@@ -323,6 +323,7 @@ function [nll, core] = localEvalThetaCore(theta, F, dF, Y, U, G, KrigingOpts, us
     core.F = F;
     core.residual = residual;
     core.sigma2 = sigma2;
+    core.nll = nll;
     core.chol_failed = false;
 end
 
@@ -335,9 +336,9 @@ function core = localFallbackCore(F, Y, U, use_ge)
     core.F = F;
     core.residual = inf(size(core.alpha));
     core.sigma2 = inf;
+    core.nll = inf;
     core.chol_failed = true;
 end
-
 
 function S = localSetDef(S, field, val)
     if ~isfield(S, field) || isempty(S.(field))
