@@ -1,5 +1,5 @@
 function InputOpts = rosenbrock_Input()
-d = 200;   % <<< 建议 60–80
+d = 30;   % <<< 建议 60–80
 
 for ii = 1:d
     InputOpts.Marginals(ii).Type = 'Uniform';
