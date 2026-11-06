@@ -1,11 +1,7 @@
 function [data, ModelOpts, ReduceModel] = aPC_dimReduction(data, ModelOpts)
 % aPC_dimReduction
 % --------------------------------------------------------------
-% 通用降维总控：
-%   - 无 ReductionMethod  : 不降维，原样返回（ReduceModel = []）
-%   - 'pls'               : 调 aPC_dimReduction_pls()
-%   - 'pca'               : 调 aPC_dimReduction_pca()
-%   - 'kpca'              : 调 aPC_dimReduction_kpca()
+% 通用降维总控；ReductionMethod 缺省或为空时原样返回（ReduceModel = []）。
 %
 % 统一做法：
 %   1) 在子函数内完成“方法本身的降维映射”，得到 X_red (N×r)
@@ -13,15 +9,13 @@ function [data, ModelOpts, ReduceModel] = aPC_dimReduction(data, ModelOpts)
 %   3) 将二次标准化参数 (mu2, sigma2) 封装进 ReduceModel.transform
 %      => 预测阶段：先子方法 transform，再做同样的标准化
 %
-% 依赖（建议在 dimreduct/ 目录下）：
-%   aPC_dimReduction_pls.m
-%   aPC_dimReduction_pca.m
-%   aPC_dimReduction_kpca.m            % 适配外部 KPCA 库
+% 依赖：dimreduct/ 中的各方法实现；核方法另需 KPCA/SKPCA 类。
 %
 % 输入：
 %   data.U        - 已在上游标准化的输入 (N×M)
 %   data.Y_train  - 输出 (N×1)（PLS 需要）
-%   ModelOpts.ReductionMethod  - 'pls' | 'pca' | 'kpca' | []/缺省
+%   ModelOpts.ReductionMethod  - 'pls' | 'pca' | 'kpca' | 'spca_hsic' |
+%                               'skpca_hsic' | 'mcp' | 'ica' | 'rp' | 'as' | []/缺省
 %   ModelOpts.red_dim          - 降维后维数
 %   方法专属参数统一在各方法内部读取（例如 mcp_opts/kpca_opts/ica_opts/rp_opts）
 %
@@ -87,13 +81,6 @@ function [data, ModelOpts, ReduceModel] = aPC_dimReduction(data, ModelOpts)
                 error('aPC:ReductionGradientRequired', 'as requires precomputed gradients.');
             end
             [X_red, ReduceModel] = aPC_dimReduction_as(U, data.dYdU_train, ModelOpts.red_dim);
-
-        case 'sas'
-            if isempty(Y), error('SAS 降维需要 data.Y_train。'); end
-            if ~isfield(data, 'dYdU_train') || isempty(data.dYdU_train)
-                error('aPC:ReductionGradientRequired', 'sas requires precomputed gradients.');
-            end
-            [X_red, ReduceModel] = aPC_dimReduction_sas(U, Y, data.dYdU_train, ModelOpts.red_dim, ModelOpts);
 
         otherwise
             error('Unknown ReductionMethod: %s', ModelOpts.ReductionMethod);

@@ -64,6 +64,5 @@ function tf = localNeedsGradientBeforeReduction(ModelOpts)
         return;
     end
 
-    method = lower(strtrim(ModelOpts.ReductionMethod));
-    tf = strcmp(method, 'as') || strcmp(method, 'sas');
+    tf = strcmpi(strtrim(ModelOpts.ReductionMethod), 'as');
 end
