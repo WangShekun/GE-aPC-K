@@ -92,14 +92,6 @@ function [A, ok] = localGetLinearMap(ReduceModel)
         return;
     end
 
-    if strcmp(method, 'as_pls')
-        if isfield(p, 'A')
-            A = p.A;
-            ok = true;
-        end
-        return;
-    end
-
     if strcmp(method, 'as')
         if isfield(p, 'A')
             A = p.A;
