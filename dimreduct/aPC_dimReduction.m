@@ -102,13 +102,6 @@ function [data, ModelOpts, ReduceModel] = aPC_dimReduction(data, ModelOpts)
             end
             [X_red, ReduceModel] = aPC_dimReduction_sas(U, Y, data.dYdU_train, ModelOpts.red_dim, ModelOpts);
 
-        case 'sgs'
-            if isempty(Y), error('SGS 降维需要 data.Y_train。'); end
-            if ~isfield(data, 'dYdU_train') || isempty(data.dYdU_train)
-                error('aPC:ReductionGradientRequired', 'sgs requires precomputed gradients.');
-            end
-            [X_red, ReduceModel] = aPC_dimReduction_sgs(U, Y, data.dYdU_train, ModelOpts.red_dim, ModelOpts);
-
         otherwise
             error('Unknown ReductionMethod: %s', ModelOpts.ReductionMethod);
     end
